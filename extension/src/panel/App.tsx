@@ -407,10 +407,19 @@ export default function App({
     let tab: TabContext | null = null;
     try {
       if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-        const [current] = await chrome.tabs.query({
+        // The panel may live in its own tab/window: target the page the user
+        // is looking at (active web tab first, else the most recent web tab).
+        const isWeb = (t: chrome.tabs.Tab) => /^https?:/i.test(t.url ?? "");
+        const [active] = await chrome.tabs.query({
           active: true,
-          currentWindow: true,
+          lastFocusedWindow: true,
         });
+        const current =
+          active && isWeb(active)
+            ? active
+            : (await chrome.tabs.query({}))
+                .filter(isWeb)
+                .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
         if (current?.id !== undefined)
           tab = {
             id: current.id,

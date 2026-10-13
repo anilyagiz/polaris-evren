@@ -111,6 +111,12 @@ describe("Panel acceptance flows", () => {
     await mountScripted();
     await clickAndRun(/Bu sayfayı özetle/, 3500);
     expect(screen.getByText("Sayfanın kısa özeti")).toBeTruthy();
+    // The "Neden?" timeline folds away once the answer arrives; open it.
+    expect(screen.queryByText("Cevap kontrol edildi")).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Neden\?/ }));
+      await Promise.resolve();
+    });
     expect(screen.getByText("Cevap kontrol edildi")).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Öğe #21" }));

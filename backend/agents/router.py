@@ -28,6 +28,15 @@ _NO_DESKTOP_NOTE = (
 _FALLBACK_WHY = "Router kararı alınamadı, güvenli varsayılan: chat."
 
 
+_ROUTE_LABELS = {
+    "chat": "sohbet",
+    "web_search": "web araması",
+    "browser_task": "tarayıcı görevi",
+    "desktop_task": "masaüstü görevi",
+    "personal": "kişisel görev",
+}
+
+
 class RouterAgent(BaseAgent):
     """Single-message classifier: `user_text` -> `RouterDecision`."""
 
@@ -69,7 +78,7 @@ class RouterAgent(BaseAgent):
 
         await self.emit_step(
             emit,
-            decision=f"Route: {decision.route}",
+            decision=f"Yönlendirme: {_ROUTE_LABELS.get(decision.route, decision.route)}",
             why=decision.why.strip()
             or (_FALLBACK_WHY if degraded else "Model gerekçe belirtmedi."),
             confidence=decision.confidence,

@@ -650,6 +650,10 @@ export function Timeline({
   live: boolean;
 }) {
   const [expanded, setExpanded] = useState(live);
+  // Open while the agents work; fold away once the answer arrives so it leads.
+  useEffect(() => {
+    if (!live) setExpanded(false);
+  }, [live]);
   const [image, setImage] = useState<string | null>(null);
   const failures = steps.filter((step) => isToolFailure(step.decision)).length;
   const totalMs = steps.reduce((sum, step) => sum + step.latency_ms, 0);

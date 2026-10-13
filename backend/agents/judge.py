@@ -48,6 +48,9 @@ _DEFAULT_WHY: dict[str, str] = {
 }
 
 
+_VERDICT_LABELS = {"pass": "geçti", "revise": "düzeltme istendi", "ask_user": "onay gerekli"}
+
+
 class JudgeAgent(BaseAgent):
     """Denetçi ajan: hedefe ulaşıldı mı, kanıt var mı, güvenli mi?"""
 
@@ -166,7 +169,7 @@ class JudgeAgent(BaseAgent):
         why = verdict.feedback.strip() or _DEFAULT_WHY.get(verdict.verdict, "")
         await self.emit_step(
             emit,
-            decision=f"Değerlendirme: {verdict.verdict}",
+            decision=f"Değerlendirme: {_VERDICT_LABELS.get(verdict.verdict, verdict.verdict)}",
             why=why,
             scores=verdict.scores,
             verdict=verdict.verdict,

@@ -86,8 +86,11 @@ class Ctx:
     def route_of(self, run: Run) -> str | None:
         for s in run.traces:
             if s["agent"] == "router":
-                m = re.match(r"Route: (\w+)", s["decision"])
-                return m.group(1) if m else None
+                from backend.agents.router import _ROUTE_LABELS
+
+                label = s["decision"].split(":", 1)[-1].strip()
+                reverse = {v: k for k, v in _ROUTE_LABELS.items()}
+                return reverse.get(label, label if label in _ROUTE_LABELS else None)
         return None
 
 
@@ -486,7 +489,7 @@ async def llm_invalid_json_router(ctx: Ctx) -> None:
     run = await ext.ask("bozukjson merhaba", tab=None, timeout=30)
     ctx.expect_final(run)
     routers = [s for s in run.traces if s["agent"] == "router"]
-    ctx.check(routers and routers[0]["decision"] == "Route: chat", "router fallback trace missing")
+    ctx.check(routers and routers[0]["decision"] == "Yönlendirme: sohbet", "router fallback trace missing")
 
 
 @scenario("llm_http_500", doc="LLM 500 on every call => retries then fallback answer (no hang, no crash)")

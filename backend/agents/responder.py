@@ -125,7 +125,7 @@ class ResponderAgent(BaseAgent):
         await self.emit_step(
             emit,
             decision="Cevap hazırlandı",
-            why=f"{len(citations)} kanıt kullanıldı",
+            why=(f"{len(citations)} kaynağa dayanıyor" if citations else "Ek kaynak gerekmedi"),
             evidence=evidence[:MAX_CITATIONS],
             usage=usage,
         )
@@ -138,6 +138,11 @@ class ResponderAgent(BaseAgent):
 
         out: list[Citation] = []
         for item in evidence:
+            if item.startswith("ref:"):
+                ref = _as_ref(item[len("ref:") :].strip())
+                if ref is not None:
+                    out.append(Citation(title=f"Sayfadaki öğe #{ref}", ref=ref))
+                continue
             if not item.startswith("url:"):
                 continue
             url = item[len("url:") :].strip()
@@ -190,10 +195,12 @@ class ResponderAgent(BaseAgent):
                     out.append(Citation(title=_title_from_url(url), url=url))
             elif isinstance(item, dict):
                 url = str(item.get("url", "") or "").strip()
-                if not url:
+                ref = _as_ref(item.get("ref"))
+                if not url and ref is None:
                     continue
-                title = str(item.get("title", "") or "").strip() or _title_from_url(url)
-                out.append(Citation(title=title, url=url, ref=_as_ref(item.get("ref"))))
+                title = str(item.get("title", "") or "").strip()
+                title = title or (_title_from_url(url) if url else f"Sayfadaki öğe #{ref}")
+                out.append(Citation(title=title, url=url, ref=ref))
         return out
 
     @staticmethod
@@ -204,13 +211,15 @@ class ResponderAgent(BaseAgent):
         seen: set[str] = set()
         for group in groups:
             for citation in group:
-                key = _normalise_url(citation.url)
+                key = _normalise_url(citation.url) if citation.url else (
+                    f"ref:{citation.ref}" if citation.ref is not None else ""
+                )
                 if not key or key in seen:
                     continue
                 seen.add(key)
                 merged.append(
                     Citation(
-                        title=citation.title or _title_from_url(citation.url),
+                        title=citation.title or (_title_from_url(citation.url) if citation.url else "Kaynak"),
                         url=citation.url,
                         ref=citation.ref,
                     )

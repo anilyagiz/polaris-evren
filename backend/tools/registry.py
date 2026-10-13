@@ -7,6 +7,7 @@ system registers itself here; nothing is dispatched by name lookup elsewhere.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
@@ -113,6 +114,9 @@ def list_for(route: str) -> list[Tool]:
         logger.warning("Unknown route %r, no tools exposed", route)
         return []
     tools = [t for t in (_REGISTRY.get(n) for n in names) if t is not None]
+    if not (os.environ.get("BRAVE_API_KEY") or "").strip():
+        # Without a key web.search can only fail; don't tempt the model with it.
+        tools = [t for t in tools if t.name != "web.search"]
     missing = [n for n in names if n not in _REGISTRY]
     if missing:
         logger.info("Route %s still misses tools: %s", route, ", ".join(missing))

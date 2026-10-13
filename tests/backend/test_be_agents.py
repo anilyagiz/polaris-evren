@@ -24,7 +24,7 @@ async def test_router_happy(scripted, emitted):
     d = await route(scripted({"route": "web_search", "confidence": 0.8, "why": "araştırma"}), emit=emitted)
     assert d.route == "web_search" and d.confidence == 0.8
     step = emitted.steps[0]
-    assert step.agent == "router" and step.decision == "Route: web_search" and step.confidence == 0.8
+    assert step.agent == "router" and step.decision == "Yönlendirme: web araması" and step.confidence == 0.8
 
 
 @pytest.mark.parametrize("bad", [
