@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tool Tester — K2</title>
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #64748b;
+        --line: #e2e8f0;
+        --accent: #ff5a1f;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: #f8fafc;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.hint { color: var(--muted); margin: 0 0 16px; }
+      .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+      button {
+        font: inherit;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+      }
+      button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+      button.run { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+      textarea, input {
+        width: 100%;
+        font: 13px/1.5 ui-monospace, monospace;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+      }
+      textarea { min-height: 90px; resize: vertical; }
+      pre {
+        margin: 0;
+        padding: 10px;
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 6px;
+        font: 12px/1.5 ui-monospace, monospace;
+        max-height: 360px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+      th { color: var(--muted); font-weight: 500; }
+      .meta { color: var(--muted); font-size: 12px; margin: 8px 0; }
+      .error { color: #b91c1c; }
+    </style>
+  </head>
+  <body>
+    <h1>Tool Tester</h1>
+    <p class="hint">
+      Aktif sekmeye <code>executeBrowserTool</code> çağırır. Önce test etmek istediğin sayfayı
+      başka bir sekmede aç, sonra buraya dön.
+    </p>
+
+    <div class="tools" id="tools"></div>
+
+    <div class="grid">
+      <div>
+        <label for="args">Argümanlar (JSON)</label>
+        <textarea id="args" spellcheck="false">{}</textarea>
+        <label for="tabId" style="margin-top: 10px">tabId (boş = aktif sekme)</label>
+        <input id="tabId" inputmode="numeric" placeholder="aktif sekme" />
+        <p class="meta" id="meta">Hazır.</p>
+        <button class="run" id="run">Çalıştır</button>
+      </div>
+      <div>
+        <label>Sonuç</label>
+        <pre id="out">—</pre>
+        <div id="elements"></div>
+      </div>
+    </div>
+
+    <script type="module" src="./tester.ts"></script>
+  </body>
+</html>
