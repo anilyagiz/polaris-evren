@@ -613,7 +613,7 @@
     }
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       if (element.readOnly || element.disabled) {
-        return fail("alan salt okunur ya da pasif");
+        return fail("alan salt okunur ya da pasif, ba\u015Fka bir alan se\xE7 ya da yeni snapshot al");
       }
       if (element instanceof HTMLInputElement) {
         const inputType = element.type.toLowerCase();
@@ -631,7 +631,7 @@
       }
     } else if (element instanceof HTMLSelectElement) {
       if (element.disabled) {
-        return fail("alan salt okunur ya da pasif");
+        return fail("alan salt okunur ya da pasif, ba\u015Fka bir alan se\xE7 ya da yeni snapshot al");
       }
       if (!selectOption(element, text)) {
         const options = Array.from(element.options).slice(0, 10).map((option) => option.text.trim()).join(" | ");

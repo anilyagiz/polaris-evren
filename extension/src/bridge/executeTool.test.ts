@@ -270,12 +270,12 @@ describe("executeBrowserTool – sekme çözümleme", () => {
     expect(fake.sendMessage).toHaveBeenCalledWith(7, expect.anything());
   });
 
-  it("hiç sekme yoksa 'Aktif sekme bulunamadı' döner", async () => {
+  it("hiç sekme yoksa sürülebilir sekme olmadığını söyler", async () => {
     fake.query.mockImplementation(async () => []);
 
     const result = await executeBrowserTool("browser.snapshot", {});
 
-    expect(result).toEqual({ ok: false, data: null, error: "Aktif sekme bulunamadı" });
+    expect(result).toEqual({ ok: false, data: null, error: "Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste" });
   });
 
   it("id'si olmayan ya da TAB_ID_NONE olan sekme kullanılmaz", async () => {
@@ -287,7 +287,7 @@ describe("executeBrowserTool – sekme çözümleme", () => {
     const result = await executeBrowserTool("browser.snapshot", {});
 
     expect(result.ok).toBe(false);
-    expect(result.error).toBe("Aktif sekme bulunamadı");
+    expect(result.error).toBe("Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste");
   });
 
   it("query fırlatırsa sıradaki sorguya geçer, exception sızmaz", async () => {
@@ -376,11 +376,11 @@ describe("executeBrowserTool – browser.navigate hedef doğrulama", () => {
     expect(fake.tab.url).toBe("https://example.com/urun");
   });
 
-  it("url eksikse ya da boşsa 'url eksik' der", async () => {
+  it("url eksikse ya da boşsa ne verileceğini söyler", async () => {
     for (const url of [undefined, "", "   ", 5, null]) {
       const result = await executeBrowserTool("browser.navigate", { url });
       expect(result.ok).toBe(false);
-      expect(result.error).toBe("url eksik");
+      expect(result.error).toBe("url eksik, http(s) ile başlayan bir adres ver");
     }
     expect(fake.update).not.toHaveBeenCalled();
   });
@@ -533,14 +533,18 @@ describe("executeBrowserTool – content script enjeksiyonu", () => {
     expect(fake.executeScript).toHaveBeenCalledTimes(1);
   });
 
-  it("başka bir hata enjeksiyon tetiklemez, mesaj olduğu gibi geri döner", async () => {
+  it("başka bir hata enjeksiyon tetiklemez, Chrome hatası çevrilip döner", async () => {
     fake.sendMessage.mockImplementation(async () => {
       throw new Error("Tab is discarded");
     });
 
     const result = await executeBrowserTool("browser.snapshot", {});
 
-    expect(result).toEqual({ ok: false, data: null, error: "Tab is discarded" });
+    expect(result).toEqual({
+      ok: false,
+      data: null,
+      error: "Sekme uykuya alınmış, önce sekmeye geç",
+    });
     expect(fake.executeScript).not.toHaveBeenCalled();
     expect(fake.sendMessage).toHaveBeenCalledTimes(1);
   });
@@ -576,7 +580,7 @@ describe("executeBrowserTool – sayfadan gelen yanıtın zarfı", () => {
 
     const result = await executeBrowserTool("browser.snapshot", {});
 
-    expect(result).toEqual({ ok: false, data: null, error: "Sayfadan geçersiz yanıt geldi" });
+    expect(result).toEqual({ ok: false, data: null, error: "Sayfadan geçersiz yanıt geldi, yeni bir snapshot al" });
   });
 
   it("ok:false ama error'suz yanıta varsayılan mesaj konur", async () => {
@@ -605,7 +609,11 @@ describe("executeBrowserTool – hiçbir yolda exception sızmaz", () => {
     const result = await executeBrowserTool("browser.snapshot", {}, 42);
 
     expectEnvelope(result);
-    expect(result).toEqual({ ok: false, data: null, error: "No tab with id: 42" });
+    expect(result).toEqual({
+      ok: false,
+      data: null,
+      error: "Sekme artık yok, yeni bir snapshot al",
+    });
   });
 
   it("Error olmayan (string) ret sebebi de mesaja çevrilir", async () => {
@@ -633,7 +641,7 @@ describe("executeBrowserTool – hiçbir yolda exception sızmaz", () => {
     expect(result.error).toBe("manifest okunamadı");
   });
 
-  it("chrome.tabs.update reddederse navigate zarf döner", async () => {
+  it("chrome.tabs.update reddederse navigate zarf döner (Chrome hatası çevrilir)", async () => {
     fake.update.mockImplementation(async () => {
       throw new Error("Cannot access contents of url");
     });
@@ -641,7 +649,7 @@ describe("executeBrowserTool – hiçbir yolda exception sızmaz", () => {
     const result = await executeBrowserTool("browser.navigate", { url: "https://example.com" });
 
     expectEnvelope(result);
-    expect(result.error).toBe("Cannot access contents of url");
+    expect(result.error).toBe("Bu sayfada asistan çalışamıyor");
   });
 
   it("content script askıda kalırsa zaman aşımı zarfı döner", async () => {
@@ -691,5 +699,52 @@ describe("executeBrowserTool – hiçbir yolda exception sızmaz", () => {
 describe("executeTool modül sözleşmesi", () => {
   it("IS_MOCK false (gerçek köprü devrede)", () => {
     expect(IS_MOCK).toBe(false);
+  });
+});
+
+/**
+ * Chrome's errors land in the model's context through `tool_result`. An English
+ * sentence written for an extension developer tells the model nothing it can
+ * act on, so each known family is rewritten; unknown ones must survive intact
+ * rather than be guessed at.
+ */
+describe("Chrome hatalarının modele uygun metne çevrilmesi", () => {
+  const cases: readonly (readonly [string, string])[] = [
+    ["Tab is discarded", "Sekme uykuya alınmış, önce sekmeye geç"],
+    ["No tab with id: 7", "Sekme artık yok, yeni bir snapshot al"],
+    ["Invalid tab ID: 7", "Sekme artık yok, yeni bir snapshot al"],
+    ["Cannot access contents of url \"https://x\"", "Bu sayfada asistan çalışamıyor"],
+    [
+      "Extension context invalidated.",
+      "Eklenti yeniden yüklendi, sekmeyi yenilemeden işlem yapılamaz",
+    ],
+    ["No frame with id 3 in tab 4", "Sayfanın o bölümü kayboldu, yeni bir snapshot al"],
+    [
+      "The message port closed before a response was received.",
+      "Sayfa cevap vermeden kapandı (muhtemelen yönlendirme), yeni bir snapshot al",
+    ],
+  ];
+
+  for (const [chromeError, expected] of cases) {
+    it(`"${chromeError.slice(0, 28)}…" → modele yön veren cümle`, async () => {
+      fake.get.mockImplementation(async () => {
+        throw new Error(chromeError);
+      });
+
+      const result = await executeBrowserTool("browser.snapshot", {}, 9);
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe(expected);
+    });
+  }
+
+  it("tanınmayan hata olduğu gibi geçer, uydurulmaz", async () => {
+    fake.get.mockImplementation(async () => {
+      throw new Error("Something nobody mapped yet");
+    });
+
+    const result = await executeBrowserTool("browser.snapshot", {}, 9);
+
+    expect(result.error).toBe("Something nobody mapped yet");
   });
 });

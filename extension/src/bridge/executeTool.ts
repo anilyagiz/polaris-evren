@@ -190,7 +190,47 @@ async function resolveTab(tabId?: number): Promise<chrome.tabs.Tab> {
       return match;
     }
   }
-  throw new Error("Aktif sekme bulunamadı");
+  throw new Error("Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste");
+}
+
+/**
+ * Chrome's own failures arrive as English sentences aimed at an extension
+ * developer ("Tab is discarded", "Extension context invalidated"). They go
+ * straight into a `tool_result` and from there into the model's context, where
+ * they say nothing about what to do next. Each known family is rewritten into
+ * one Turkish sentence that names the recovery step; anything unrecognised is
+ * passed through unchanged rather than guessed at.
+ */
+const CHROME_ERROR_HINTS: readonly (readonly [RegExp, string])[] = [
+  [
+    /receiving end does not exist|could not establish connection/i,
+    "Sayfaya bağlanılamadı, sekmeyi yenileyip tekrar dene",
+  ],
+  [/cannot access|must request permission|blocked a frame/i, RESTRICTED_MESSAGE],
+  [/no tab with id|invalid tab id/i, "Sekme artık yok, yeni bir snapshot al"],
+  [/tab (is|was) discarded/i, "Sekme uykuya alınmış, önce sekmeye geç"],
+  [
+    /extension context invalidated/i,
+    "Eklenti yeniden yüklendi, sekmeyi yenilemeden işlem yapılamaz",
+  ],
+  [
+    /frame (was removed|not found)|no frame with id/i,
+    "Sayfanın o bölümü kayboldu, yeni bir snapshot al",
+  ],
+  [
+    /message port closed/i,
+    "Sayfa cevap vermeden kapandı (muhtemelen yönlendirme), yeni bir snapshot al",
+  ],
+];
+
+function toActionableError(error: unknown): string {
+  const raw = messageOf(error);
+  for (const [pattern, hint] of CHROME_ERROR_HINTS) {
+    if (pattern.test(raw)) {
+      return hint;
+    }
+  }
+  return raw;
 }
 
 /** A missing receiver is the one error we retry after injecting the script. */
@@ -252,7 +292,7 @@ async function waitForContentScript(tabId: number, timeoutMs: number): Promise<v
  */
 function asEnvelope(response: unknown): ToolResponse {
   if (typeof response !== "object" || response === null || !("ok" in response)) {
-    return fail("Sayfadan geçersiz yanıt geldi");
+    return fail("Sayfadan geçersiz yanıt geldi, yeni bir snapshot al");
   }
   const candidate = response as ToolResponse;
   return {
@@ -433,7 +473,7 @@ async function navigate(
 ): Promise<ToolResponse<NavigateResult>> {
   const raw = args.url;
   if (typeof raw !== "string" || raw.trim() === "") {
-    return fail("url eksik");
+    return fail("url eksik, http(s) ile başlayan bir adres ver");
   }
 
   const normalized = normalizeNavigateUrl(raw);
@@ -483,7 +523,7 @@ export async function executeBrowserTool(
   try {
     const tab = await resolveTab(tabId);
     if (tab.id === undefined) {
-      return fail("Aktif sekme bulunamadı");
+      return fail("Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste");
     }
     // Navigation is checked against its TARGET, not the current page: leaving a
     // brave://newtab is legitimate and is how most browser tasks start.
@@ -506,10 +546,6 @@ export async function executeBrowserTool(
       "işlem sayfada tamamlanmış olabilir, tekrar denemeden önce yeni bir snapshot al",
     );
   } catch (error: unknown) {
-    const message = messageOf(error);
-    if (isMissingReceiver(error)) {
-      return fail("Sayfaya bağlanılamadı, sekmeyi yenileyip tekrar dene");
-    }
-    return fail(message);
+    return fail(toActionableError(error));
   }
 }

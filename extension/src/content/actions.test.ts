@@ -193,7 +193,7 @@ describe("type – native value setter yolu", () => {
     const disabledResult = await actions.type({ ref: 2, text: "x" });
 
     expect(readonlyResult).toMatchObject({ ok: false, data: null });
-    expect(readonlyResult.error).toBe("alan salt okunur ya da pasif");
+    expect(readonlyResult.error).toBe("alan salt okunur ya da pasif, başka bir alan seç ya da yeni snapshot al");
     expect(readonlyInput?.value).toBe("sabit");
     expect(disabledResult.ok).toBe(false);
     expect(disabledInput?.value).toBe("pasif");

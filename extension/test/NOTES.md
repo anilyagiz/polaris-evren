@@ -140,12 +140,12 @@ hatayı kanıtla" kuralıyla). Çıkan **gerçek** hatalar, ciddiyet sırasıyla
 
 ## Otomatik testler
 
-K2 kodunun artık **191 testi** var (önceden sıfırdı):
+K2 kodunun artık **199 testi** var (önceden sıfırdı):
 
 ```
 npx vitest run --config src/dev/vitest.k2.config.ts
   src/content/types.test.ts        10
-  src/bridge/executeTool.test.ts   72
+  src/bridge/executeTool.test.ts   80
   src/content/snapshot.test.ts     41
   src/content/actions.test.ts      68
 ```
@@ -277,10 +277,48 @@ Dönüşlerde sözleşmeden **iki küçük sapma** var, ikisi de ek alan (`ok` y
 
 İstemiyorsan tek satırda kaldırırım, sözleşmeyi bozmamak önceliklidir.
 
-Hata mesajları LLM'in okuyup düzeltebileceği şekilde yazıldı:
-`"ref bulunamadı, yeni snapshot al"`, `"password_field_blocked: …"`,
-`"seçenek bulunamadı. Mevcut seçenekler: …"`, `"Bu sayfada asistan çalışamıyor"`,
-`"timeout: <tool> 8000 ms içinde bitmedi"`, `"Sayfaya bağlanılamadı, sekmeyi yenileyip tekrar dene"`.
+### Hata sözlüğü
+
+Köprünün ve content script'in üretebildiği **bütün** hata metinleri. Her biri modelin
+bir sonraki adımda ne yapacağını söylüyor; hiçbiri yalnızca "başarısız" demiyor:
+
+| Mesaj | Ne zaman | Modelin yapması gereken |
+|---|---|---|
+| `ref bulunamadı, yeni snapshot al` | ref eskimiş ya da öğe gitmiş | yeni snapshot |
+| `ref eksik ya da sayı değil` | bozuk argüman | argümanı düzelt |
+| `password_field_blocked: şifre/kart alanına yazılmaz, kullanıcıdan iste` | korumalı alan | kullanıcıya sor |
+| `öğe pasif (disabled), önce etkinleştiren adımı yap ya da yeni snapshot al` | disabled tıklama | önkoşulu tamamla |
+| `alan salt okunur ya da pasif, başka bir alan seç ya da yeni snapshot al` | readonly input | başka alan |
+| `bu alan metin kabul etmiyor (input type=…), click kullan` | checkbox/file/button'a `type` | `click`'e geç |
+| `bu öğeye yazılamaz (role=…), metin kutusu seç` | yazılamayan öğe | textbox seç |
+| `seçenek bulunamadı. Mevcut seçenekler: …` | select'te eşleşme yok | listeden seç |
+| `metin yazıldı ama form gönderilmedi: "X" alanı doğrulamayı geçmiyor (…)` | HTML5 doğrulama engeli | önce o alanı doldur |
+| `direction "up" ya da "down" olmalı` | bozuk argüman | argümanı düzelt |
+| `url eksik, http(s) ile başlayan bir adres ver` | navigate argümanı | url ver |
+| `Bu sayfada asistan çalışamıyor` | `brave://`, Web Store, erişilemeyen sayfa | önce `navigate` |
+| `Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste` | açık normal sekme yok | kullanıcıya sor |
+| `Sayfaya bağlanılamadı, sekmeyi yenileyip tekrar dene` | enjeksiyon da başarısız | kullanıcıya sor |
+| `Sayfadan geçersiz yanıt geldi, yeni bir snapshot al` | content script yanıt vermedi | yeni snapshot |
+| `timeout: <tool> 8000 ms içinde bitmedi (işlem sayfada tamamlanmış olabilir, tekrar denemeden önce yeni bir snapshot al)` | çağrı bütçesi doldu | **körlemesine tekrarlama**, snapshot al |
+| `timeout: sayfa 14000 ms içinde yüklenmedi` | navigate bütçesi | tekrar dene / başka url |
+| `Sekme kapatıldı` | navigate sırasında sekme gitti | yeni sekme |
+
+**Chrome'un kendi hataları çevriliyor.** `chrome.*` İngilizce ve geliştiriciye yazılmış
+cümleler döndürüyor; bunlar `tool_result` üzerinden doğrudan modelin bağlamına giriyordu.
+Artık bilinen aileler tek cümleye çevriliyor, **tanınmayan hata olduğu gibi geçiyor**
+(uydurulmuyor):
+
+| Chrome | Çeviri |
+|---|---|
+| `Tab is discarded` | Sekme uykuya alınmış, önce sekmeye geç |
+| `No tab with id` / `Invalid tab ID` | Sekme artık yok, yeni bir snapshot al |
+| `Cannot access contents…` | Bu sayfada asistan çalışamıyor |
+| `Extension context invalidated` | Eklenti yeniden yüklendi, sekmeyi yenilemeden işlem yapılamaz |
+| `No frame with id` | Sayfanın o bölümü kayboldu, yeni bir snapshot al |
+| `The message port closed…` | Sayfa cevap vermeden kapandı (muhtemelen yönlendirme), yeni bir snapshot al |
+
+Bu tabloyu 8 test koruyor (`executeTool.test.ts` → "Chrome hatalarının modele uygun metne
+çevrilmesi"), sonuncusu tanınmayan hatanın bozulmadan geçtiğini doğruluyor.
 
 ## Açık işler
 

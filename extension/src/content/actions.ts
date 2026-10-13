@@ -373,7 +373,7 @@ export async function type(args: Record<string, unknown>): Promise<ToolResponse<
 
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     if (element.readOnly || element.disabled) {
-      return fail("alan salt okunur ya da pasif");
+      return fail("alan salt okunur ya da pasif, başka bir alan seç ya da yeni snapshot al");
     }
     if (element instanceof HTMLInputElement) {
       const inputType = element.type.toLowerCase();
@@ -398,7 +398,7 @@ export async function type(args: Record<string, unknown>): Promise<ToolResponse<
     }
   } else if (element instanceof HTMLSelectElement) {
     if (element.disabled) {
-      return fail("alan salt okunur ya da pasif");
+      return fail("alan salt okunur ya da pasif, başka bir alan seç ya da yeni snapshot al");
     }
     if (!selectOption(element, text)) {
       const options = Array.from(element.options)
