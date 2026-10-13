@@ -205,7 +205,7 @@ export function useLlmDraft(backend: string) {
       });
       // The backend already writes the duration into its message ("· 2,8 sn").
       const latency =
-        result.ok && result.latency_ms != null && !/sn|ms/.test(result.message)
+        result.ok && result.latency_ms != null && !/\d(?:[.,]\d+)? ?(?:sn|ms)\b/.test(result.message)
           ? ` · ${Math.round(result.latency_ms)} ms`
           : "";
       setTest({
