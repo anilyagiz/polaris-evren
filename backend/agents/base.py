@@ -142,6 +142,9 @@ class FinalAnswer(BaseModel):
 # ---------------------------------------------------------------------------
 # History entry passed to executor / judge
 # ---------------------------------------------------------------------------
+_HISTORY_LIMITS = {"browser.read": 4000, "web.search": 2500, "memory.search": 1500, "reminders.list": 1500}
+
+
 @dataclass
 class HistoryEntry:
     tool: str
@@ -156,7 +159,9 @@ class HistoryEntry:
         status = "ok" if self.ok else f"HATA: {self.error or 'bilinmiyor'}"
         if self.rejected:
             status = "kullanıcı reddetti"
-        body = _short(self.data if self.ok else self.error)
+        # Reading tools exist to bring page text to the model: don't starve them.
+        limit = _HISTORY_LIMITS.get(self.tool, 600) if self.ok else 600
+        body = _short(self.data if self.ok else self.error, limit)
         return f"- {self.tool}({_short(self.args, 160)}) -> {status}: {body}"
 
     def to_message(self) -> str:

@@ -324,12 +324,15 @@ export function roleOf(element: HTMLElement): string {
 
 /** The element the user would consider "the page content". */
 export function mainContentRoot(): HTMLElement {
-  return (
+  const main =
     document.querySelector<HTMLElement>("main") ??
-    document.querySelector<HTMLElement>("article") ??
-    document.querySelector<HTMLElement>("[role='main']") ??
-    document.body
-  );
+    document.querySelector<HTMLElement>("[role='main']");
+  if (main) return main;
+  // A lone <article> is the content; many <article>s (product cards, feed
+  // items) are siblings in a listing, so read the whole page instead.
+  const articles = document.querySelectorAll<HTMLElement>("article");
+  if (articles.length === 1) return articles[0];
+  return document.body;
 }
 
 /**

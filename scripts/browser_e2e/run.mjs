@@ -259,6 +259,11 @@ async function waitExchange(panel, index, timeout = STEP_TIMEOUT) {
   await waitFor(async () => (await ex.locator(".spin").count()) === 0, timeout, `exchange #${index} to finish`);
   const answer = (await ex.locator(".markdown").count()) ? await ex.locator(".markdown").first().innerText() : "";
   const err = (await ex.locator("p.error").count()) ? await ex.locator("p.error").first().innerText() : "";
+  // The "Neden?" timeline folds once the answer arrives; open it to read the steps.
+  const toggle = ex.locator(".timeline-toggle");
+  if ((await toggle.count()) && (await toggle.first().getAttribute("aria-expanded")) === "false") {
+    await toggle.first().click();
+  }
   // Labels are localized ("Yönlendirici"…); the agent id is in the class name.
   const badges = await ex.locator(".agent-badge").evaluateAll((els) =>
     els.map((el) => [...el.classList].find((c) => c.startsWith("agent-") && c !== "agent-badge")?.slice(6) ?? el.textContent));
