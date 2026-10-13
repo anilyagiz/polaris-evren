@@ -1,7 +1,7 @@
-"""Voice smoke test.
+"""Voice smoke test: STT (webm -> text) and TTS (Turkish sentence -> mp3).
 
 Usage (from repo root):
-    python scripts/test_voice.py                 # in-process STT
+    python scripts/test_voice.py                 # in-process STT + TTS
     python scripts/test_voice.py --http http://localhost:8000   # also hit the running server
 """
 from __future__ import annotations
@@ -112,6 +112,66 @@ def test_stt_http(base_url: str, sample: Path) -> None:
         r.raise_for_status()
 
 
+def test_clean_text() -> None:
+    from backend.voice.tts import MAX_CHARS, clean_text
+
+    cases = {
+        "## Başlık\n**Kalın** ve _italik_ 🎧 metin": "Başlık Kalın ve italik metin",
+        "Kaynak: [Brave](https://brave.com) ve https://example.com/a?b=1 adresi": "Kaynak: Brave ve adresi",
+        "- bir\n- iki\n1. üç": "bir iki üç",
+        "`kod` ```\nblok\n```son": "kod son",
+    }
+    for raw, expected in cases.items():
+        got = clean_text(raw)
+        assert got == expected, f"{raw!r} -> {got!r}, beklenen {expected!r}"
+    long = clean_text("Uzun bir cümle. " * 100)
+    assert len(long) <= MAX_CHARS and long.endswith("."), long[-20:]
+    print("[tts] clean_text OK")
+
+
+def _is_mp3(data: bytes) -> bool:
+    return data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0)
+
+
+async def test_tts() -> bytes | None:
+    from backend.voice import stt, tts
+
+    text = tts.clean_text("Merhaba, ben **kişisel asistanınız**. Size nasıl yardımcı olabilirim? 😊")
+    started = time.perf_counter()
+    try:
+        audio = await tts.synthesize(text)
+    except RuntimeError:
+        print("[tts] UYARI: hiçbir TTS motoru çalışmadı; /tts 503 dönecek, panel tarayıcı sesine geçer")
+        return None
+    assert _is_mp3(audio), "TTS çıktısı mp3 değil"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / "tts.mp3").write_bytes(audio)
+    print(f"[tts] {len(audio)} bayt mp3 ({time.perf_counter() - started:.2f}s) -> {OUT_DIR / 'tts.mp3'}")
+
+    back = await stt.transcribe_bytes(audio, suffix=".mp3")
+    print(f"[tts] geri çeviri (STT): {back['text']!r}")
+    assert "yardımcı" in back["text"].lower(), back["text"]
+    return audio
+
+
+def test_tts_http(base_url: str) -> None:
+    import httpx
+
+    with httpx.Client(base_url=base_url, timeout=60) as client:
+        started = time.perf_counter()
+        r = client.post("/tts", json={"text": "Toplantınız yarın saat onda."})
+        print(
+            f"[tts-http] {r.status_code} {r.headers.get('content-type')} {len(r.content)} bayt"
+            f"  ({time.perf_counter() - started:.2f}s)"
+        )
+        assert r.status_code in (200, 503), r.text
+        if r.status_code == 200:
+            assert _is_mp3(r.content)
+        r = client.post("/tts", json={"text": "🎧 https://example.com"})
+        print(f"[tts-http] boş metin -> {r.status_code} {r.json()}")
+        assert r.status_code == 400
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--http", metavar="BASE_URL", help="also test the running server, e.g. http://localhost:8000")
@@ -123,8 +183,11 @@ async def main() -> None:
     print(f"[sample] {sample} ({sample.stat().st_size} bayt)")
 
     await test_stt(sample, expect_sentence=args.sample is None)
+    test_clean_text()
+    await test_tts()
     if args.http:
         test_stt_http(args.http, sample)
+        test_tts_http(args.http)
     print("OK")
 
 
