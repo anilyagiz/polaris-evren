@@ -119,6 +119,34 @@ checkbox `value` alanları (`"true"`/`"false"`) beklendiği gibi.
 - `src/dev/tester.html` production build'de de açılsın istiyorsak vite
   `build.rollupOptions.input`'a eklenmeli. Dev modda gerek yok.
 
+## K3'e: `tools/browser.py` için argüman şemaları
+
+`tools/registry.py` henüz hiçbir dalda yok. Sarmalları yazarken LLM'e gidecek JSON
+Schema'lar şunlar olmalı — köprünün gerçekten kabul ettiği argümanlar bunlar:
+
+| name | parameters (JSON Schema) | risk |
+|---|---|---|
+| `browser.snapshot` | `{"type":"object","properties":{},"additionalProperties":false}` | safe |
+| `browser.click` | `{"type":"object","properties":{"ref":{"type":"integer","minimum":1}},"required":["ref"]}` | safe |
+| `browser.type` | `{"type":"object","properties":{"ref":{"type":"integer","minimum":1},"text":{"type":"string"},"submit":{"type":"boolean","default":false}},"required":["ref","text"]}` | `submit:true` → confirm |
+| `browser.scroll` | `{"type":"object","properties":{"direction":{"enum":["up","down"]}},"required":["direction"]}` | safe |
+| `browser.navigate` | `{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}` | safe |
+| `browser.read` | `{"type":"object","properties":{"ref":{"type":["integer","null"],"minimum":1}}}` | safe |
+| `browser.highlight` | `{"type":"object","properties":{"ref":{"type":"integer","minimum":1}},"required":["ref"]}` | safe |
+
+Dönüşlerde sözleşmeden **iki küçük sapma** var, ikisi de ek alan (`ok` yerinde duruyor):
+
+- `browser.type` → `{ok, submitted}` — `submit:true` istenip de form bulunamadığında
+  Enter'a düşüldüğünü trace'te görebilmek için.
+- `browser.scroll` → `{ok, scroll_y}` — Executor'ın "daha aşağı var mı" kararı için.
+
+İstemiyorsan tek satırda kaldırırım, sözleşmeyi bozmamak önceliklidir.
+
+Hata mesajları LLM'in okuyup düzeltebileceği şekilde yazıldı:
+`"ref bulunamadı, yeni snapshot al"`, `"password_field_blocked: …"`,
+`"seçenek bulunamadı. Mevcut seçenekler: …"`, `"Bu sayfada asistan çalışamıyor"`,
+`"timeout: <tool> 8000 ms içinde bitmedi"`, `"Sayfaya bağlanılamadı, sekmeyi yenileyip tekrar dene"`.
+
 ## Açık işler
 
 - [ ] Manifest geldikten sonra: enjeksiyon yedeği, 8 sn timeout, `brave://` reddi ve

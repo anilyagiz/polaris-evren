@@ -245,12 +245,15 @@ export async function executeBrowserTool(
     if (tab.id === undefined) {
       return fail("Aktif sekme bulunamadı");
     }
-    if (isRestrictedUrl(tab.url)) {
-      return fail(RESTRICTED_MESSAGE);
-    }
-
+    // Navigation is checked against its TARGET, not the current page: leaving a
+    // brave://newtab is legitimate and is how most browser tasks start.
     if (name === "browser.navigate") {
       return await withTimeout(navigate(tab.id, args), NAVIGATE_TIMEOUT_MS + 1000, name);
+    }
+
+    // Everything else needs a content script, which these pages never run.
+    if (isRestrictedUrl(tab.url)) {
+      return fail(RESTRICTED_MESSAGE);
     }
 
     return await withTimeout(sendToContentScript(tab.id, name, args), CALL_TIMEOUT_MS, name);
