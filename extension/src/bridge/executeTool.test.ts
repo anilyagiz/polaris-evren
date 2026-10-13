@@ -270,6 +270,29 @@ describe("executeBrowserTool – sekme çözümleme", () => {
     expect(fake.sendMessage).toHaveBeenCalledWith(7, expect.anything());
   });
 
+  it("tabId panelin KENDİ sekmesiyse (sekme yedeği) kullanıcının sayfası çözülür", async () => {
+    // Panel tab olarak açıldığında {active, currentWindow} sorgusu panelin
+    // kendisini döndürür ve id'si buraya gelir (gerçek tarayıcı E2E'sinde bulundu).
+    const ownPage: FakeTab = { id: 3, url: `${EXTENSION_ROOT}src/panel/index.html` };
+    fake.get.mockImplementationOnce(async () => ({ ...ownPage }));
+    fake.query.mockImplementation(async () => [ownPage, fake.tab]);
+
+    const result = await executeBrowserTool("browser.snapshot", {}, 3);
+
+    expect(result.ok).toBe(true);
+    expect(fake.sendMessage).toHaveBeenCalledWith(7, expect.anything());
+    expect(fake.sendMessage).not.toHaveBeenCalledWith(3, expect.anything());
+  });
+
+  it("tabId kısıtlı bir web dışı sayfaysa (chrome://) sessizce başka sekmeye geçilmez", async () => {
+    fake.get.mockImplementationOnce(async () => ({ id: 9, url: "chrome://settings" }));
+
+    const result = await executeBrowserTool("browser.snapshot", {}, 9);
+
+    expect(result).toEqual({ ok: false, data: null, error: "Bu sayfada asistan çalışamıyor" });
+    expect(fake.query).not.toHaveBeenCalled();
+  });
+
   it("hiç sekme yoksa sürülebilir sekme olmadığını söyler", async () => {
     fake.query.mockImplementation(async () => []);
 

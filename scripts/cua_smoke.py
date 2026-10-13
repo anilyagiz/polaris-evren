@@ -169,7 +169,7 @@ async def smoke_offline() -> None:
     ctx = registry.ToolContext(request_id="r_tools", bridge=None, tab=None, emit_trace=emit)
     snap = (await registry.get("desktop.snapshot").handler({}, ctx))["data"]
     assert snap["source"] == "desktop" and traces and traces[0].evidence[0].startswith("shot:/shots/r_tools_1")
-    print(f"[tools] desktop.snapshot -> {len(snap['elements'])} öğe, trace evidence {traces[0]['evidence']}")
+    print(f"[tools] desktop.snapshot -> {len(snap['elements'])} öğe, trace evidence {traces[0].evidence}")
 
     target = next(e for e in snap["elements"] if e["name"].startswith("File"))
     r = await registry.get("desktop.click").handler({"ref": target["ref"]}, ctx)
@@ -188,6 +188,8 @@ async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--offline", action="store_true", help="test perception and tools without Docker")
     args = parser.parse_args()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Turkish output on cp1252 consoles
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     await (smoke_offline() if args.offline else smoke_real())
     print("OK")

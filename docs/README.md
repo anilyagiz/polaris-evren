@@ -4,7 +4,7 @@ Brave tarayıcısının **yan panelinde** çalışan; sesli, açıklanabilir (za
 tarayıcı/masaüstünü kullanabilen kişisel asistan. Bu belge sistemi **sıfırdan
 ~15 dakikada** ayağa kaldırmak için yeterlidir.
 
-> **Hızlı yol:** Tek komutla kurulum için kök [`README.md`](../README.md) ve `scripts/setup.ps1`,
+> **Hızlı yol:** Kökteki `start-polaris.cmd` dosyasına çift tıklayın (kurulum + başlatma). Ayrıntı: kök [`README.md`](../README.md), `scripts/setup.ps1`,
 > `scripts/run-backend.ps1`, `scripts/build-extension.ps1`, `scripts/doctor.py`. Mimari: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 > Bu belge ses/araç (K5) ayrıntılarını ve ölçümleri içerir.
 
@@ -66,7 +66,7 @@ Repo **kökünden** çalıştırın (`backend` bir pakettir):
 
 ```powershell
 cd <repo-kökü>
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1     # venv + paketler + .env + pnpm install
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1     # venv + paketler + .env + npm install (-DownloadModels: whisper modeli)
 .\scripts\run-backend.ps1                                      # uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 # elle: py -3.12 -m venv .venv ; .venv\Scripts\activate ; pip install -r backend\requirements.txt
 ```
@@ -84,7 +84,7 @@ bu normaldir, bir kez olur ve bellekte kalır (ilk çağrı ~4,8 sn; sonrakiler 
 > `vite.config.ts` ve `src/**` onlara aittir.
 
 ```powershell
-.\scripts\build-extension.ps1   # = cd extension; pnpm install; pnpm build -> extension/dist
+.\scripts\build-extension.ps1   # = cd extension; npm install --no-package-lock; npm run build -> extension/dist
 ```
 
 1. Brave'de `brave://extensions` adresini aç.

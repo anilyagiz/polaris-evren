@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main, integration]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest + e2e)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      # Testler gercek LLM / arama / model kullanmaz (mock + fake LLM).
+      DEEPSEEK_API_KEY: ""
+      BRAVE_API_KEY: ""
+      CUA_ENABLED: "false"
+      HF_HUB_OFFLINE: "1" # whisper modeli asla indirilmesin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+            backend/requirements-tray.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          if (Test-Path backend/requirements-tray.txt) { pip install -r backend/requirements-tray.txt }
+
+      - name: Unit tests
+        run: python -m pytest -q tests --ignore=tests/e2e
+
+      - name: E2E (fake LLM + fake extension)
+        run: python scripts/e2e/run.py
+
+  extension:
+    name: Extension (tsc + vitest + vite build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install (npm, kilit dosyasi yok)
+        run: npm install --no-package-lock --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Build
+        run: npx vite build
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: polaris-extension-dist
+          path: extension/dist
+          if-no-files-found: error
+          retention-days: 14
+
+  scripts:
+    name: PowerShell script syntax
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse scripts/*.ps1
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) { $bad++; Write-Host "::error file=$($_.Name)::$($errs[0].Message)" } else { Write-Host "OK $($_.Name)" }
+          }
+          if ($bad) { exit 1 }

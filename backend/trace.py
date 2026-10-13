@@ -23,6 +23,14 @@ Verdict = Literal["pass", "revise", "ask_user"]
 
 SendFn = Callable[[dict[str, Any]], Awaitable[None]]
 EmitFn = Callable[["TraceStep"], Awaitable["TraceStep"]]
+SnapshotFn = Callable[[], "dict[str, Any] | None"]
+
+#: Shown instead of text typed into password / card fields.
+MASK = "••••"
+#: Longest string value kept in `traces.tool_args` (SQLite).
+MAX_STORED_ARG_CHARS = 200
+#: Upper bound for `TraceStore.history(limit=...)` (and GET /traces).
+MAX_HISTORY_LIMIT = 500
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS traces (
@@ -118,6 +126,52 @@ def make_step(
     )
 
 
+# ---------------------------------------------------------------------------
+# Redaction: secrets never leave the process in a trace (sent or stored).
+# ---------------------------------------------------------------------------
+def redact_tool_args(
+    name: str | None, args: dict[str, Any] | None, snapshot: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Copy of `args` with text typed into sensitive fields replaced by MASK.
+
+    `browser.type` into an element whose role/name/type/autocomplete looks like
+    a password, PIN, card number or CVV is masked.  When no snapshot is known
+    the field cannot be classified, so only the name check applies.
+    """
+
+    out = dict(args or {})
+    if name != "browser.type" or "text" not in out:
+        return out
+    from .tools.registry import find_element, is_sensitive_element
+
+    if is_sensitive_element(find_element(snapshot, out.get("ref"))):
+        out["text"] = MASK
+    return out
+
+
+def cap_strings(value: Any, limit: int = MAX_STORED_ARG_CHARS) -> Any:
+    """Recursively truncate long strings (keeps the DB small and leaks short)."""
+
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "…"
+    if isinstance(value, dict):
+        return {k: cap_strings(v, limit) for k, v in value.items()}
+    if isinstance(value, list):
+        return [cap_strings(v, limit) for v in value]
+    return value
+
+
+def redact_step(step: TraceStep, snapshot: dict[str, Any] | None) -> TraceStep:
+    """Return `step` (or a masked copy) safe to send to the panel and persist."""
+
+    if step.tool is None:
+        return step
+    masked = redact_tool_args(step.tool.name, step.tool.args, snapshot)
+    if masked == step.tool.args:
+        return step
+    return step.model_copy(update={"tool": ToolInvocation(name=step.tool.name, args=masked)})
+
+
 class TraceStore:
     """Writes every step to SQLite; emitting to the panel is the caller's job."""
 
@@ -168,7 +222,7 @@ class TraceStore:
                     json.dumps(step.get("evidence") or [], ensure_ascii=False),
                     step.get("confidence"),
                     tool.get("name"),
-                    json.dumps(tool.get("args") or {}, ensure_ascii=False) if tool else None,
+                    json.dumps(cap_strings(tool.get("args") or {}), ensure_ascii=False) if tool else None,
                     json.dumps(step.get("scores"), ensure_ascii=False) if step.get("scores") else None,
                     step.get("verdict"),
                     int(step.get("latency_ms") or 0),
@@ -181,6 +235,7 @@ class TraceStore:
     async def history(self, request_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Read back a request's timeline (used by /trace and debugging)."""
 
+        limit = max(1, min(int(limit), MAX_HISTORY_LIMIT))
         return await asyncio.to_thread(self._history_sync, request_id, limit)
 
     def _history_sync(self, request_id: str, limit: int) -> list[dict[str, Any]]:
@@ -196,15 +251,31 @@ class TraceStore:
         return [dict(row) for row in rows]
 
 
-def make_emitter(send: SendFn, store: TraceStore, request_id: str) -> EmitFn:
-    """Bind a TraceStep sink to one request: send frame -> then persist."""
+def make_emitter(
+    send: SendFn,
+    store: TraceStore,
+    request_id: str,
+    snapshot_provider: SnapshotFn | None = None,
+) -> EmitFn:
+    """Bind a TraceStep sink to one request: redact -> send frame -> persist.
+
+    `snapshot_provider` returns the latest page snapshot so text typed into
+    password/card fields can be masked; the caller's step is never mutated.
+    """
 
     async def emit(step: TraceStep) -> TraceStep:
+        snapshot = None
+        if snapshot_provider is not None:
+            try:
+                snapshot = snapshot_provider()
+            except Exception:  # pragma: no cover - defensive
+                snapshot = None
+        safe = redact_step(step, snapshot)
         try:
-            await send(step.to_event(request_id))
+            await send(safe.to_event(request_id))
         except Exception as exc:
             logger.warning("Trace emit failed for %s: %s", request_id, exc)
-        await store.save(request_id, step)
+        await store.save(request_id, safe)
         return step
 
     return emit

@@ -28,3 +28,11 @@ assistant/
 asistan-mimari.html
 polaris-deck/
 whatsapp/
+
+# Surum paketleri (scripts/package-release.ps1)
+release/
+# pnpm kullanilmiyor (npm --no-package-lock)
+extension/pnpm-lock.yaml
+# tray derleme ciktilari
+tray/dist/
+tray/build/

@@ -6,6 +6,7 @@ Gizli degerleri ASLA yazdirmaz; yalnizca "dolu/bos" bilgisi verir.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -15,7 +16,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-HOST, PORT = "127.0.0.1", 8000
+HOST = "127.0.0.1"
+PORT = 8000  # main() icinde PORT ortam degiskeni / backend/.env PORT ile guncellenir
 
 OK, WARN, FAIL = "[ OK ]", "[UYARI]", "[HATA]"
 results: list[tuple[str, str, str]] = []
@@ -56,8 +58,8 @@ def check_node() -> None:
         except ValueError:
             major = 0
         add(OK if major >= 18 else FAIL, "Node.js", out + ("" if major >= 18 else " - 18+ gerekli"))
-    pn = run(["pnpm", "--version"])
-    add(OK if pn else FAIL, "pnpm", pn or "bulunamadi (npm install -g pnpm)")
+    npm = run(["npm", "--version"])
+    add(OK if npm else FAIL, "npm", npm or "bulunamadi (Node.js ile gelir)")
 
 
 def check_venv() -> None:
@@ -123,7 +125,7 @@ def port_in_use() -> bool:
 
 def check_backend() -> None:
     if not port_in_use():
-        add(WARN, f"Port {PORT}", "bos - backend calismiyor (.\\scripts\\run-backend.ps1)")
+        add(WARN, f"Port {PORT}", "bos - backend calismiyor (start-polaris.cmd veya .\\scripts\\run-backend.ps1)")
         return
     try:
         with urllib.request.urlopen(f"http://{HOST}:{PORT}/health", timeout=3) as r:
@@ -136,7 +138,12 @@ def check_backend() -> None:
         else:
             add(FAIL, "GET /health", f"ok degil: {data}")
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        add(FAIL, f"Port {PORT}", f"dolu ama /health yanit vermiyor ({type(exc).__name__}); baska program olabilir")
+        add(
+            FAIL,
+            f"Port {PORT}",
+            f"dolu ama /health yanit vermiyor ({type(exc).__name__}); baska program olabilir. "
+            "Kapatin ya da backend/.env icine PORT=8010 yazin (panel Ayarlar -> http://localhost:8010)",
+        )
 
 
 def check_extension() -> None:
@@ -145,8 +152,24 @@ def check_extension() -> None:
         add(OK, "extension/dist", "derlenmis")
     else:
         add(FAIL, "extension/dist", "yok -> .\\scripts\\build-extension.ps1")
-    nm = (ROOT / "extension" / "node_modules").exists()
-    add(OK if nm else WARN, "extension/node_modules", "kurulu" if nm else "yok -> pnpm install")
+    nm_dir = ROOT / "extension" / "node_modules"
+    if (nm_dir / ".pnpm").exists():
+        add(WARN, "extension/node_modules", "pnpm ile kurulmus -> silip: npm install --no-package-lock")
+    elif nm_dir.exists():
+        add(OK, "extension/node_modules", "kurulu (npm)")
+    else:
+        add(WARN, "extension/node_modules", "yok -> cd extension; npm install --no-package-lock")
+
+
+def check_whisper_model(env: dict[str, str]) -> None:
+    size = os.environ.get("STT_MODEL") or env.get("STT_MODEL") or "small"
+    hf_home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    hub = Path(os.environ.get("HF_HUB_CACHE") or hf_home / "hub")
+    found = hub.exists() and any(hub.glob(f"models--*faster-whisper-{size}*"))
+    if found:
+        add(OK, f"Whisper modeli ({size})", "onbellekte")
+    else:
+        add(WARN, f"Whisper modeli ({size})", "indirilmemis - ilk sesli istek uzun surer (setup.ps1 -DownloadModels)")
 
 
 def check_docker(env: dict[str, str]) -> None:
@@ -170,8 +193,13 @@ def main() -> int:
     check_node()
     check_venv()
     env = check_env()
+    global PORT
+    port_raw = os.environ.get("PORT") or env.get("PORT", "")
+    if port_raw.isdigit():
+        PORT = int(port_raw)
     check_backend()
     check_extension()
+    check_whisper_model(env)
     check_docker(env)
     add(OK, "ffmpeg", "gerekmez (PyAV webm/opus'u cozer)")
 

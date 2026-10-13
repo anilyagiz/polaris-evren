@@ -1,12 +1,18 @@
 """The ONLY module that talks to the CUA SDK. If the CUA API changes, fix it here.
 
-Verified against cua-sandbox 0.9.0 (pip install "cua[sandbox]"):
-- Sandbox.ephemeral(image, local=True, ...) is an async context manager yielding a Sandbox
-- Image.linux(kind="container") -> ghcr.io/trycua/linux via DockerRuntime (default kind is a QEMU VM)
+Verified end to end on Windows 10 + Docker Desktop 28, Python 3.13, cua-sandbox 0.9.0 (+ cua 0.4.1):
+- Sandbox.ephemeral(Image.linux(kind="container"), local=True, runtime="runc") is an async context
+  manager yielding a Sandbox; exiting it deletes the container. Image: ghcr.io/trycua/linux:24.04
+  (1.26 GB download, 4.6 GB on disk; XFCE on Xvfb :1, 1280x800, cua-spacesd). Start ~4 s.
+  Image.linux() without kind= would be a QEMU VM (software-only on Windows, very slow).
+- The SDK's Rust runtime only probes Unix Docker sockets; on Windows DOCKER_HOST must name the
+  Docker Desktop named pipe (we set npipe:////./pipe/docker_engine when DOCKER_HOST is unset).
 - sb.screenshot(format="png") -> bytes, sb.screen.size() -> (w, h)
-- sb.mouse.click(x, y), sb.mouse.scroll(x, y, scroll_x, scroll_y)  (+scroll_y = up)
+- sb.mouse.click(x, y), sb.mouse.scroll(x, y, scroll_x=, scroll_y=)  (+scroll_y = up, in notches)
 - sb.keyboard.type(text), sb.keyboard.keypress(["ctrl", "l"])
-- sb.shell.run(command, timeout=...)
+- sb.shell.run(command, timeout=...) -> CommandResult(stdout, stderr, returncode)
+- Keyboard calls right after start can fail with "no window has keyboard focus" until XFCE is up;
+  start() waits for the panel and type/press fall back to xdotool on that error.
 """
 from __future__ import annotations
 
@@ -14,6 +20,8 @@ import asyncio
 import io
 import logging
 import os
+import shlex
+import sys
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
@@ -23,6 +31,27 @@ SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 800
 SCROLL_NOTCHES = 5
 START_TIMEOUT_S = 180
+DESKTOP_READY_TIMEOUT_S = 30
+WINDOWS_DOCKER_HOST = "npipe:////./pipe/docker_engine"
+DISPLAY_ENV = "DISPLAY=${DISPLAY:-:1}"
+
+# CUA key names -> xdotool keysyms (only for the no-focus fallback)
+_XDOTOOL_KEYS = {
+    "enter": "Return", "return": "Return", "esc": "Escape", "escape": "Escape", "tab": "Tab",
+    "backspace": "BackSpace", "delete": "Delete", "del": "Delete", "space": "space",
+    "up": "Up", "down": "Down", "left": "Left", "right": "Right", "home": "Home", "end": "End",
+    "pageup": "Page_Up", "pagedown": "Page_Down", "win": "super", "cmd": "super", "meta": "super",
+}
+
+
+def _is_focus_error(exc: Exception) -> bool:
+    return "keyboard focus" in str(exc).lower()
+
+
+def _prepare_docker_env() -> None:
+    """cua's runtime only probes Unix sockets; point it at Docker Desktop's named pipe on Windows."""
+    if sys.platform == "win32" and not os.environ.get("DOCKER_HOST"):
+        os.environ["DOCKER_HOST"] = WINDOWS_DOCKER_HOST
 
 
 class DesktopSession:
@@ -45,20 +74,38 @@ class DesktopSession:
                 return
             from cua_sandbox import Image, Sandbox
 
-            logger.info("Starting CUA Linux container sandbox...")
-            cm = Sandbox.ephemeral(Image.linux(kind="container"), local=True, telemetry_enabled=False)
+            _prepare_docker_env()
+            runtime = os.getenv("CUA_RUNTIME", "runc").strip() or None  # runc: no gVisor needed
+            logger.info("Starting CUA Linux container sandbox (runtime=%s)...", runtime or "auto")
+            cm = Sandbox.ephemeral(
+                Image.linux(kind="container"), local=True, runtime=runtime, telemetry_enabled=False
+            )
             self._sb = await asyncio.wait_for(cm.__aenter__(), timeout=START_TIMEOUT_S)
             self._cm = cm
+            await self._wait_desktop_ready()
             await self._fix_resolution()
+
+    async def _wait_desktop_ready(self) -> None:
+        """Wait until the XFCE panel has a window (keyboard input fails before that). Best effort."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + DESKTOP_READY_TIMEOUT_S
+        while loop.time() < deadline:
+            try:
+                res = await self._sb.shell.run(f"{DISPLAY_ENV} wmctrl -l", timeout=5)
+                if "xfce4-panel" in (res.stdout or ""):
+                    await asyncio.sleep(1)  # let the desktop finish drawing
+                    return
+            except Exception as exc:
+                logger.debug("desktop not ready yet: %s", exc)
+            await asyncio.sleep(0.5)
+        logger.warning("Desktop not ready after %ss; continuing", DESKTOP_READY_TIMEOUT_S)
 
     async def _fix_resolution(self) -> None:
         """Pin the screen size so ref coordinates stay consistent. Best effort."""
         try:
             size = tuple(await self._sb.screen.size())
             if size != (self.width, self.height):
-                await self._sb.shell.run(
-                    f"DISPLAY=${{DISPLAY:-:1}} xrandr -s {self.width}x{self.height}", timeout=10
-                )
+                await self._sb.shell.run(f"{DISPLAY_ENV} xrandr -s {self.width}x{self.height}", timeout=10)
                 size = tuple(await self._sb.screen.size())
             self.width, self.height = int(size[0]), int(size[1])
             logger.info("Sandbox screen size: %dx%d", self.width, self.height)
@@ -70,6 +117,11 @@ class DesktopSession:
             await self.start()
         return self._sb
 
+    async def _xdotool(self, sb: Any, args: str) -> None:
+        res = await sb.shell.run(f"{DISPLAY_ENV} xdotool {args}", timeout=30)
+        if getattr(res, "returncode", 0) != 0:
+            raise RuntimeError(f"xdotool failed: {(res.stderr or res.stdout or '').strip()[:200]}")
+
     async def screenshot(self) -> bytes:
         sb = await self._ensure()
         return await sb.screenshot(format="png")
@@ -80,7 +132,13 @@ class DesktopSession:
 
     async def type_text(self, text: str) -> None:
         sb = await self._ensure()
-        await sb.keyboard.type(text)
+        try:
+            await sb.keyboard.type(text)
+        except Exception as exc:
+            if not _is_focus_error(exc):
+                raise
+            logger.info("keyboard.type: no focused window, falling back to xdotool")
+            await self._xdotool(sb, f"type --delay 12 -- {shlex.quote(text)}")
 
     async def press(self, combo: str) -> None:
         """combo like "ctrl+l", "enter", "ctrl+shift+t"."""
@@ -88,7 +146,14 @@ class DesktopSession:
         if not keys:
             raise ValueError("empty key combo")
         sb = await self._ensure()
-        await sb.keyboard.keypress(keys)
+        try:
+            await sb.keyboard.keypress(keys)
+        except Exception as exc:
+            if not _is_focus_error(exc):
+                raise
+            logger.info("keyboard.keypress: no focused window, falling back to xdotool")
+            xkeys = "+".join(_XDOTOOL_KEYS.get(k, k) for k in keys)
+            await self._xdotool(sb, f"key -- {shlex.quote(xkeys)}")
 
     async def scroll(self, direction: str) -> None:
         if direction not in ("up", "down"):

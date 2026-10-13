@@ -1,16 +1,111 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ExternalLink, ShieldCheck, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  LoaderCircle,
+  PlugZap,
+  RefreshCw,
+  ServerOff,
+  ShieldAlert,
+  ShieldCheck,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
+import { isToolFailure, type FriendlyError } from "./errors";
 import {
+  checkHealth,
+  RUN_BACKEND_COMMAND,
+  RUN_BACKEND_SCRIPT,
+  type HealthState,
+} from "./health";
+import {
+  normalizeBackend,
   safeUrl,
   shotUrl,
   type Citation,
   type Confirmation,
+  type ConnectionStatus,
   type TraceStep,
 } from "./protocol";
-import type { Settings } from "./settings";
+import {
+  backendError,
+  extensionVersion,
+  isLocalBackend,
+  type Settings,
+} from "./settings";
+
+/** Four-pointed north star used as the brand mark. */
+export function PolarisMark({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M12 1.5c.5 4.9 1.9 7.9 4.3 9.2.9.5 2.3.9 4.2 1.3-1.9.4-3.3.8-4.2 1.3-2.4 1.3-3.8 4.3-4.3 9.2-.5-4.9-1.9-7.9-4.3-9.2-.9-.5-2.3-.9-4.2-1.3 1.9-.4 3.3-.8 4.2-1.3 2.4-1.3 3.8-4.3 4.3-9.2Z"
+        fill="currentColor"
+      />
+      <circle cx="19" cy="5" r="1.1" fill="currentColor" opacity=".55" />
+    </svg>
+  );
+}
+
+async function copyText(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Copy button with a short "Kopyalandı" confirmation. */
+export function CopyButton({
+  value,
+  label,
+  className = "text-button",
+  children,
+}: {
+  value: string;
+  label: string;
+  className?: string;
+  children?: ReactNode;
+}) {
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle") return;
+    const timer = setTimeout(() => setState("idle"), 1600);
+    return () => clearTimeout(timer);
+  }, [state]);
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-label={label}
+      title={label}
+      onClick={() =>
+        void copyText(value).then((ok) => setState(ok ? "done" : "failed"))
+      }
+    >
+      {state === "done" ? <Check size={13} /> : <Copy size={13} />}
+      <span aria-live="polite">
+        {state === "done"
+          ? "Kopyalandı"
+          : state === "failed"
+            ? "Kopyalanamadı"
+            : (children ?? "Kopyala")}
+      </span>
+    </button>
+  );
+}
 
 export function Markdown({ text }: { text: string }) {
   return (
@@ -47,10 +142,12 @@ export function Modal({
   title,
   onClose,
   children,
+  className = "",
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -64,7 +161,8 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className="modal"
+      className={`modal ${className}`}
+      aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -105,19 +203,45 @@ export function ConfirmModal({
     const timer = setInterval(tick, 250);
     return () => clearInterval(timer);
   }, [deadline]);
+  const args = Object.entries(pending.args);
   return (
-    <Modal title="Onayın gerekiyor" onClose={() => onDecide(false)}>
-      <div className="approval-symbol">
-        <ShieldCheck size={28} />
+    <Modal
+      title="Onayın gerekiyor"
+      className="confirm-modal"
+      onClose={() => onDecide(false)}
+    >
+      <div className="approval-head">
+        <span className="approval-symbol">
+          <ShieldCheck size={24} />
+        </span>
+        <p className="approval-summary">{pending.summary}</p>
       </div>
-      <p>{pending.summary}</p>
-      <div className="tool-code">
-        {pending.tool}
-        <pre>{JSON.stringify(pending.args, null, 2)}</pre>
+      <dl className="approval-details">
+        <div>
+          <dt>İşlem</dt>
+          <dd>
+            <code>{pending.tool}</code>
+          </dd>
+        </div>
+        {args.map(([key, value]) => (
+          <div key={key}>
+            <dt>{key}</dt>
+            <dd>
+              <code>
+                {typeof value === "string" ? value : JSON.stringify(value)}
+              </code>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="countdown" role="timer">
+        <div className="countdown-track" aria-hidden="true">
+          <i style={{ width: `${Math.min(100, (remaining / 60) * 100)}%` }} />
+        </div>
+        <span>
+          {remaining} saniye içinde cevap verilmezse işlem reddedilir.
+        </span>
       </div>
-      <p className="muted small" role="timer">
-        {remaining} saniye içinde cevap verilmezse işlem reddedilir.
-      </p>
       <div className="button-row">
         <button className="secondary" onClick={() => onDecide(false)}>
           Reddet
@@ -126,9 +250,19 @@ export function ConfirmModal({
           <Check size={16} /> Onayla
         </button>
       </div>
+      <p className="approval-foot">
+        Polaris onayın olmadan gönderme, satın alma veya silme yapmaz.
+      </p>
     </Modal>
   );
 }
+
+type TestState =
+  | { kind: "idle" }
+  | { kind: "testing" }
+  | { kind: "ok"; text: string }
+  | { kind: "warn"; text: string }
+  | { kind: "fail"; text: string };
 
 export function SettingsModal({
   current,
@@ -144,15 +278,37 @@ export function SettingsModal({
   const [draft, setDraft] = useState(current);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [test, setTest] = useState<TestState>({ kind: "idle" });
+  const urlError = backendError(draft.backend);
+  const remote = !urlError && !isLocalBackend(draft.backend);
+  const runTest = async () => {
+    if (urlError) return;
+    setTest({ kind: "testing" });
+    const result = await checkHealth(draft.backend);
+    if (result.kind === "unreachable")
+      setTest({ kind: "fail", text: `Bağlanılamadı: ${result.message}` });
+    else if (result.kind === "ok" && result.health.llm_configured === false)
+      setTest({
+        kind: "warn",
+        text: "Sunucu çalışıyor ama yapay zekâ anahtarı ayarlı değil.",
+      });
+    else if (result.kind === "ok")
+      setTest({
+        kind: "ok",
+        text: `Bağlantı başarılı${result.health.llm_model ? ` · model: ${result.health.llm_model}` : ""}`,
+      });
+  };
   return (
     <Modal title="Ayarlar" onClose={onClose}>
       <form
+        noValidate
         onSubmit={async (event) => {
           event.preventDefault();
+          if (urlError) return;
           setSaving(true);
           setError("");
           try {
-            await onSave(draft);
+            await onSave({ ...draft, backend: normalizeBackend(draft.backend) });
             onClose();
           } catch (cause) {
             setError(
@@ -163,35 +319,58 @@ export function SettingsModal({
           }
         }}
       >
-        <label className="field-label" htmlFor="backend">
-          Backend adresi
-        </label>
-        <input
-          id="backend"
-          type="url"
-          required
-          value={draft.backend}
-          disabled={busy}
-          onChange={(event) =>
-            setDraft({ ...draft, backend: event.target.value })
-          }
-          placeholder="http://localhost:8000"
-        />
-        <p className="muted small">Panelin bağlanacağı FastAPI servisi.</p>
-        <label className="setting-row">
-          <span>
-            <strong>Mock modu</strong>
-            <small>Örnek verilerle paneli dene.</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={draft.mock}
-            disabled={busy}
-            onChange={(event) =>
-              setDraft({ ...draft, mock: event.target.checked })
-            }
-          />
-        </label>
+        <section className="settings-group">
+          <label className="field-label" htmlFor="backend">
+            Sunucu adresi
+          </label>
+          <div className="field-with-action">
+            <input
+              id="backend"
+              type="url"
+              inputMode="url"
+              spellCheck={false}
+              autoComplete="off"
+              value={draft.backend}
+              disabled={busy}
+              aria-invalid={Boolean(urlError)}
+              aria-describedby="backend-help"
+              onChange={(event) => {
+                setDraft({ ...draft, backend: event.target.value });
+                setTest({ kind: "idle" });
+              }}
+              placeholder="http://localhost:8000"
+            />
+            <button
+              type="button"
+              className="secondary compact"
+              disabled={Boolean(urlError) || test.kind === "testing"}
+              onClick={() => void runTest()}
+            >
+              {test.kind === "testing" ? (
+                <LoaderCircle size={14} className="spin" />
+              ) : (
+                <PlugZap size={14} />
+              )}
+              Bağlantıyı test et
+            </button>
+          </div>
+          <p id="backend-help" className={urlError ? "field-error" : "field-help"}>
+            {urlError ??
+              (remote
+                ? "Uyarı: uzantı güvenlik politikası yalnızca localhost ve 127.0.0.1 adreslerine izin verir."
+                : "Polaris sunucusunun (FastAPI) adresi.")}
+          </p>
+          {test.kind !== "idle" && test.kind !== "testing" && (
+            <p className={`test-result ${test.kind}`} role="status">
+              {test.kind === "ok" ? (
+                <Check size={13} />
+              ) : (
+                <TriangleAlert size={13} />
+              )}
+              {test.text}
+            </p>
+          )}
+        </section>
         <label className="setting-row">
           <span>
             <strong>Sesli yanıt</strong>
@@ -199,6 +378,8 @@ export function SettingsModal({
           </span>
           <input
             type="checkbox"
+            role="switch"
+            className="switch"
             checked={draft.speak}
             onChange={(event) =>
               setDraft({ ...draft, speak: event.target.checked })
@@ -206,20 +387,203 @@ export function SettingsModal({
           />
         </label>
         {busy && (
-          <p className="muted small">
+          <p className="field-help">
             Bağlantı ayarlarını değiştirmek için mevcut görevin bitmesini bekle.
           </p>
         )}
         {error && (
-          <p className="error" role="alert">
+          <p className="field-error" role="alert">
             {error}
           </p>
         )}
-        <button className="primary full" type="submit" disabled={saving}>
+        <button
+          className="primary full"
+          type="submit"
+          disabled={saving || Boolean(urlError)}
+        >
           {saving ? "Kaydediliyor…" : "Kaydet"}
         </button>
+        <p className="version-line">Polaris sürüm {extensionVersion()}</p>
       </form>
     </Modal>
+  );
+}
+
+/** First-run / health cards shown above the conversation in live mode. */
+export function HealthCard({
+  health,
+  backend,
+  checking,
+  onRetry,
+}: {
+  health: HealthState;
+  backend: string;
+  checking: boolean;
+  onRetry: () => void;
+}) {
+  const retry = (
+    <button className="secondary compact" onClick={onRetry} disabled={checking}>
+      <RefreshCw size={14} className={checking ? "spin" : ""} />
+      {checking ? "Kontrol ediliyor…" : "Tekrar dene"}
+    </button>
+  );
+  if (health.kind === "unreachable")
+    return (
+      <section className="health-card danger" aria-labelledby="health-title">
+        <div className="health-head">
+          <span className="health-icon">
+            <ServerOff size={18} />
+          </span>
+          <div>
+            <h3 id="health-title">Polaris sunucusu çalışmıyor</h3>
+            <p>
+              {backend} adresine ulaşılamadı. Polaris tepsi uygulamasını aç ya
+              da repo kökünde şunu çalıştır:
+            </p>
+          </div>
+        </div>
+        <div className="command">
+          <code>{RUN_BACKEND_COMMAND}</code>
+          <CopyButton
+            value={RUN_BACKEND_COMMAND}
+            label="Komutu kopyala"
+            className="copy-command"
+          />
+        </div>
+        <p className="health-note">
+          {health.message} Geliştirici kurulumunda alternatif:{" "}
+          <code>{RUN_BACKEND_SCRIPT}</code>. Sunucu açılınca bu kart kendiliğinden
+          kaybolur.
+        </p>
+        <div className="health-actions">
+          {retry}
+        </div>
+      </section>
+    );
+  if (health.kind === "ok" && health.health.llm_configured === false)
+    return (
+      <section className="health-card warning" aria-labelledby="health-title">
+        <div className="health-head">
+          <span className="health-icon">
+            <ShieldAlert size={18} />
+          </span>
+          <div>
+            <h3 id="health-title">Yapay zekâ anahtarı ayarlı değil</h3>
+            <p>
+              <code>backend/.env</code> içine <code>DEEPSEEK_API_KEY</code> ve{" "}
+              <code>LLM_MODEL</code> yaz, sunucuyu yeniden başlat.
+            </p>
+          </div>
+        </div>
+        <div className="health-actions">{retry}</div>
+      </section>
+    );
+  return null;
+}
+
+const onOff = (value: boolean | null, on: string, off: string) =>
+  value === null ? null : value ? on : off;
+
+export function StatusPopover({
+  settings,
+  status,
+  health,
+  checking,
+  onRecheck,
+  onClose,
+}: {
+  settings: Settings;
+  status: ConnectionStatus;
+  health: HealthState;
+  checking: boolean;
+  onRecheck: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const down = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !ref.current?.contains(target) &&
+        !(target instanceof Element && target.closest(".connection"))
+      )
+        closeRef.current();
+    };
+    document.addEventListener("mousedown", down);
+    return () => document.removeEventListener("mousedown", down);
+  }, []);
+  const info = health.kind === "ok" ? health.health : null;
+  const rows: Array<[string, string | null]> = [
+        ["Sunucu", settings.backend],
+        [
+          "Bağlantı",
+          { connected: "Bağlı", connecting: "Bağlanıyor", disconnected: "Kopuk" }[
+            status
+          ],
+        ],
+        [
+          "Sağlık",
+          health.kind === "ok"
+            ? "Çalışıyor"
+            : health.kind === "checking"
+              ? "Kontrol ediliyor"
+              : "Ulaşılamıyor",
+        ],
+        ["Model", info?.llm_model ?? (info ? "—" : null)],
+        ["Yapay zekâ", info ? onOff(info.llm_configured, "Hazır", "Anahtar yok") : null],
+        ["Masaüstü (CUA)", info ? onOff(info.cua_enabled, "Açık", "Kapalı") : null],
+        ["Ses tanıma", info ? onOff(info.stt_ready, "Hazır", "Hazır değil") : null],
+        ["Brave arama", info ? onOff(info.brave_configured, "Ayarlı", "Anahtar yok") : null],
+        ["Sunucu sürümü", info?.version ?? null],
+        ["Uzantı", extensionVersion()],
+  ];
+  return (
+    <div
+      ref={ref}
+      className="status-popover"
+      role="dialog"
+      aria-label="Bağlantı durumu"
+    >
+      <dl>
+        {rows
+          .filter((row): row is [string, string] => row[1] !== null)
+          .map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+      </dl>
+      <button
+        className="secondary compact full-width"
+        onClick={onRecheck}
+        disabled={checking}
+      >
+        <RefreshCw size={13} className={checking ? "spin" : ""} /> Yeniden
+        kontrol et
+      </button>
+    </div>
+  );
+}
+
+export function ErrorNote({ error }: { error: FriendlyError }) {
+  return (
+    <div className="error-card" role="alert">
+      <TriangleAlert size={15} />
+      <div>
+        <strong>{error.title}</strong>
+        <p>{error.hint}</p>
+        {error.detail && error.detail !== error.title && (
+          <details>
+            <summary>Ayrıntı</summary>
+            <p className="error-detail">{error.detail}</p>
+          </details>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -237,6 +601,7 @@ export function Sources({
       <div className="chips">
         {citations.map((citation, index) => (
           <span className="source-chip" key={index}>
+            <span className="source-index">{index + 1}</span>
             {safeUrl(citation.url) ? (
               <a
                 href={safeUrl(citation.url)}
@@ -264,6 +629,15 @@ export function Sources({
   );
 }
 
+const agentNames: Record<TraceStep["agent"], string> = {
+  router: "Yönlendirici",
+  planner: "Planlayıcı",
+  executor: "Uygulayıcı",
+  judge: "Denetçi",
+  responder: "Yanıtlayıcı",
+  system: "Sistem",
+};
+
 export function Timeline({
   steps,
   backend,
@@ -277,135 +651,160 @@ export function Timeline({
 }) {
   const [expanded, setExpanded] = useState(live);
   const [image, setImage] = useState<string | null>(null);
+  const failures = steps.filter((step) => isToolFailure(step.decision)).length;
+  const totalMs = steps.reduce((sum, step) => sum + step.latency_ms, 0);
   return (
-    <section className="timeline">
+    <section className={`timeline ${live ? "live" : ""}`}>
       <button
         className="timeline-toggle"
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
         <span>
-          <span className="sparkle">✦</span> Neden?{" "}
-          <small>{steps.length} adım</small>
+          <span className="sparkle">
+            <PolarisMark size={13} />
+          </span>{" "}
+          Neden? <small>{steps.length} adım</small>
+          {failures > 0 && (
+            <small className="failure-count">{failures} araç hatası</small>
+          )}
         </span>
-        <ChevronDown size={16} className={expanded ? "rotated" : ""} />
+        <span className="timeline-meta">
+          {totalMs > 0 && <small>{(totalMs / 1000).toFixed(1)} sn</small>}
+          <ChevronDown size={16} className={expanded ? "rotated" : ""} />
+        </span>
       </button>
       {expanded && (
-        <div className="timeline-steps">
+        <ol className="timeline-steps">
           {steps.length === 0 ? (
-            <p className="muted small">İlk adım bekleniyor…</p>
+            <li className="muted small waiting">İlk adım bekleniyor…</li>
           ) : (
-            steps.map((step, index) => (
-              <article className="trace-step" key={`${step.ts}-${index}`}>
-                <div className="trace-heading">
-                  <span className={`agent-badge agent-${step.agent}`}>
-                    {step.agent}
-                  </span>
-                  <small>
-                    {step.latency_ms} ms
-                    {step.tokens != null ? ` · ${step.tokens} token` : ""}
-                  </small>
-                </div>
-                <strong>{step.decision}</strong>
-                <p>{step.why}</p>
-                {step.confidence !== null && (
-                  <div className="confidence">
-                    <div
-                      role="progressbar"
-                      aria-label="Güven"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={Math.round(step.confidence * 100)}
-                    >
-                      <i style={{ width: `${step.confidence * 100}%` }} />
+            steps.map((step, index) => {
+              const failed = isToolFailure(step.decision);
+              return (
+                <li
+                  className={`trace-step agent-line-${step.agent} ${failed ? "failed" : ""}`}
+                  key={`${step.ts}-${index}`}
+                >
+                  <div className="trace-heading">
+                    <span className={`agent-badge agent-${step.agent}`}>
+                      {agentNames[step.agent]}
+                    </span>
+                    {failed && (
+                      <span className="failed-badge">Araç başarısız</span>
+                    )}
+                    <small>
+                      {step.latency_ms} ms
+                      {step.tokens != null ? ` · ${step.tokens} token` : ""}
+                    </small>
+                  </div>
+                  <strong>{step.decision}</strong>
+                  {step.why && step.why !== step.decision && <p>{step.why}</p>}
+                  {step.confidence !== null && (
+                    <div className="confidence">
+                      <div
+                        role="progressbar"
+                        aria-label="Güven"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(step.confidence * 100)}
+                      >
+                        <i style={{ width: `${step.confidence * 100}%` }} />
+                      </div>
+                      <span>%{Math.round(step.confidence * 100)} güven</span>
                     </div>
-                    <span>%{Math.round(step.confidence * 100)} güven</span>
-                  </div>
-                )}
-                {step.tool && (
-                  <code className="tool-code">
-                    {step.tool.name}(
-                    {Object.entries(step.tool.args)
-                      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-                      .join(", ")}
-                    )
-                  </code>
-                )}
-                {step.scores && (
-                  <div className="scores">
-                    <span>
-                      Doğruluk <b>{step.scores.correct}/5</b>
-                    </span>
-                    <span>
-                      Tamlık <b>{step.scores.complete}/5</b>
-                    </span>
-                    <span>
-                      Güvenlik <b>{step.scores.safe}/5</b>
-                    </span>
-                  </div>
-                )}
-                {step.verdict && (
-                  <span className={`verdict ${step.verdict}`}>
-                    {
-                      {
-                        pass: "Geçti",
-                        revise: "Düzeltme",
-                        ask_user: "Onay bekliyor",
-                      }[step.verdict]
-                    }
-                  </span>
-                )}
-                <div className="chips">
-                  {step.evidence.map((evidence, position) => {
-                    if (/^ref:\d+$/.test(evidence))
-                      return (
-                        <button
-                          className="chip"
-                          key={position}
-                          onClick={() => highlight(Number(evidence.slice(4)))}
-                        >
-                          Öğe #{evidence.slice(4)}
-                        </button>
-                      );
-                    if (
-                      evidence.startsWith("url:") &&
-                      safeUrl(evidence.slice(4))
-                    )
-                      return (
-                        <a
-                          className="chip"
-                          key={position}
-                          href={safeUrl(evidence.slice(4))}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Kaynak <ExternalLink size={11} />
-                        </a>
-                      );
-                    const shot = evidence.startsWith("shot:")
-                      ? shotUrl(evidence.slice(5), backend)
-                      : undefined;
-                    if (shot)
-                      return (
-                        <button
-                          className="shot-thumb"
-                          key={position}
-                          onClick={() => setImage(shot)}
-                        >
-                          <img src={shot} alt="Masaüstü kanıtını büyüt" />
-                        </button>
-                      );
-                    return (
-                      <span className="evidence-text" key={position}>
-                        {evidence}
+                  )}
+                  {step.tool && (
+                    <code className="tool-code">
+                      {step.tool.name}(
+                      {Object.entries(step.tool.args)
+                        .map(
+                          ([key, value]) => `${key}=${JSON.stringify(value)}`,
+                        )
+                        .join(", ")}
+                      )
+                    </code>
+                  )}
+                  {step.scores && (
+                    <div className="scores">
+                      <span>
+                        Doğruluk <b>{step.scores.correct}/5</b>
                       </span>
-                    );
-                  })}
-                </div>
-              </article>
-            ))
+                      <span>
+                        Tamlık <b>{step.scores.complete}/5</b>
+                      </span>
+                      <span>
+                        Güvenlik <b>{step.scores.safe}/5</b>
+                      </span>
+                    </div>
+                  )}
+                  {step.verdict && (
+                    <span className={`verdict ${step.verdict}`}>
+                      {
+                        {
+                          pass: "Geçti",
+                          revise: "Düzeltme",
+                          ask_user: "Onay bekliyor",
+                        }[step.verdict]
+                      }
+                    </span>
+                  )}
+                  {step.evidence.length > 0 && (
+                    <div className="chips">
+                      {step.evidence.map((evidence, position) => {
+                        if (/^ref:\d+$/.test(evidence))
+                          return (
+                            <button
+                              className="chip"
+                              key={position}
+                              onClick={() =>
+                                highlight(Number(evidence.slice(4)))
+                              }
+                            >
+                              Öğe #{evidence.slice(4)}
+                            </button>
+                          );
+                        if (
+                          evidence.startsWith("url:") &&
+                          safeUrl(evidence.slice(4))
+                        )
+                          return (
+                            <a
+                              className="chip"
+                              key={position}
+                              href={safeUrl(evidence.slice(4))}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Kaynak <ExternalLink size={11} />
+                            </a>
+                          );
+                        const shot = evidence.startsWith("shot:")
+                          ? shotUrl(evidence.slice(5), backend)
+                          : undefined;
+                        if (shot)
+                          return (
+                            <button
+                              className="shot-thumb"
+                              key={position}
+                              onClick={() => setImage(shot)}
+                            >
+                              <img src={shot} alt="Masaüstü kanıtını büyüt" />
+                            </button>
+                          );
+                        return (
+                          <span className="evidence-text" key={position}>
+                            {evidence}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </li>
+              );
+            })
           )}
-        </div>
+        </ol>
       )}
       {image && (
         <Modal title="Masaüstü kanıtı" onClose={() => setImage(null)}>

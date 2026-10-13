@@ -1,0 +1,13 @@
+{
+  "name": "polaris-browser-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-browser E2E: Chromium + built Polaris extension + real backend + fake LLM",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
+}

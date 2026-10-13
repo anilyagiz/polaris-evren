@@ -24,6 +24,9 @@ DATA_DIR = BACKEND_DIR / "data"
 DEFAULT_DB_PATH = DATA_DIR / "assistant.db"
 PROMPTS_DIR = BACKEND_DIR / "prompts"
 
+#: Product version reported by /health and the startup banner.
+APP_VERSION = "0.1.0"
+
 load_dotenv(BACKEND_DIR / ".env")
 
 
@@ -78,10 +81,18 @@ class Settings:
     request_budget_s: float
     max_revisions: int
     reminder_poll_s: float
+    #: False when LLM_MODEL is not set in the environment (default model used).
+    llm_model_explicit: bool = True
+    #: Max /stt + /tts requests per client per minute (each path counted separately).
+    voice_rate_limit_per_min: int = 30
 
     @property
     def llm_configured(self) -> bool:
         return bool(self.deepseek_api_key)
+
+    @property
+    def brave_configured(self) -> bool:
+        return bool(self.brave_api_key)
 
     @property
     def tz(self) -> ZoneInfo:
@@ -117,11 +128,47 @@ def get_settings() -> Settings:
         llm_temperature_chat=_env_float("LLM_TEMPERATURE_CHAT", 0.6),
         tool_timeout_s=_env_float("TOOL_TIMEOUT_S", 20.0),
         confirm_timeout_s=_env_float("CONFIRM_TIMEOUT_S", 60.0),
-        max_tool_calls=_env_int("MAX_TOOL_CALLS", 8),
-        request_budget_s=_env_float("REQUEST_BUDGET_S", 90.0),
+        max_tool_calls=_env_int("MAX_TOOL_CALLS", 12),
+        request_budget_s=_env_float("REQUEST_BUDGET_S", 240.0),
         max_revisions=_env_int("MAX_REVISIONS", 2),
         reminder_poll_s=_env_float("REMINDER_POLL_S", 30.0),
+        llm_model_explicit=bool(_env("LLM_MODEL")),
+        voice_rate_limit_per_min=_env_int("VOICE_RATE_LIMIT_PER_MIN", 30),
     )
+
+
+def config_warnings(settings: Settings | None = None) -> list[str]:
+    """Turkish, human-readable problems with the configuration.
+
+    Never includes secret values — only whether a key is present.
+    """
+
+    s = settings or get_settings()
+    warnings: list[str] = []
+    if not s.llm_configured:
+        warnings.append(
+            "DEEPSEEK_API_KEY tanımlı değil: LLM gerektiren istekler hata dönecek "
+            "(backend/.env dosyasına ekleyin)."
+        )
+    if not s.llm_model_explicit:
+        warnings.append(f"LLM_MODEL tanımlı değil: varsayılan model '{s.llm_model}' kullanılıyor.")
+    if not s.brave_configured:
+        warnings.append("BRAVE_API_KEY tanımlı değil: web araması (web.search) çalışmayacak.")
+    return warnings
+
+
+def missing_keys(settings: Settings | None = None) -> list[str]:
+    """Names (only names) of unset environment keys that matter to users."""
+
+    s = settings or get_settings()
+    names: list[str] = []
+    if not s.llm_configured:
+        names.append("DEEPSEEK_API_KEY")
+    if not s.llm_model_explicit:
+        names.append("LLM_MODEL")
+    if not s.brave_configured:
+        names.append("BRAVE_API_KEY")
+    return names
 
 
 def now_local() -> datetime:

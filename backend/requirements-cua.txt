@@ -1,5 +1,13 @@
-# İsteğe bağlı: masaüstü computer use (CUA_ENABLED=true). Docker Desktop + WSL2 gerekir.
+# İsteğe bağlı: masaüstü computer use (CUA_ENABLED=true). Docker Desktop (WSL2) gerekir.
 # Önce:  pip install -r backend/requirements.txt
-cua[sandbox]
-rapidocr-onnxruntime
-numpy
+# Doğrulandı: Windows 10 Home, Python 3.13, Docker Desktop 28 (bkz. docs/cua-setup.md).
+# Python 3.11-3.13 (cua-sandbox: <3.14).
+cua-sandbox==0.9.0          # Sandbox/Image API; cua==0.4.1 (Rust runtime, Windows wheel) ile birlikte gelir
+cua==0.4.1
+# OCR: bakımı süren 'rapidocr' (modeller wheel içinde). 'rapidocr-onnxruntime' KULLANMAYIN:
+# Python 3.13'te pip onu 2022'den kalma 1.2.3'e çözer ve metin kaçırır.
+rapidocr==3.10.0
+onnxruntime>=1.20
+opencv-python-headless>=4.10  # rapidocr bağımlılığı; 'opencv-python' ile aynı anda kurmayın
+numpy>=2.0
+pillow>=10.0

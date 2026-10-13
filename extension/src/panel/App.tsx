@@ -1,27 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
-  AudioLines,
-  CheckCheck,
   CircleStop,
-  Compass,
   LoaderCircle,
   Mic,
   Settings as SettingsIcon,
   ShieldCheck,
-  Sparkles,
+  Trash2,
   Volume2,
   X,
 } from "lucide-react";
 import { executeBrowserTool } from "../bridge/executeTool";
 import {
   ConfirmModal,
+  CopyButton,
+  ErrorNote,
+  HealthCard,
   Markdown,
+  PolarisMark,
   SettingsModal,
   Sources,
+  StatusPopover,
   Timeline,
 } from "./components";
-import { createMockTransport } from "./mocks/session";
+import { friendlyError, type FriendlyError } from "./errors";
+import { checkHealth, type HealthState } from "./health";
 import {
   normalizeBackend,
   requestId,
@@ -39,7 +42,7 @@ import {
   type Settings,
 } from "./settings";
 import { useRecorder, useSpeaker } from "./voice";
-import { connectSocket, type Transport } from "./ws";
+import { connectSocket, type OnEvent, type OnStatus, type Transport } from "./ws";
 
 interface Request {
   id: string;
@@ -51,20 +54,65 @@ interface Request {
   spoken: string;
   citations: Citation[];
   status: "running" | "done" | "cancelled" | "error";
-  error?: string;
+  error?: FriendlyError;
 }
 interface Pending {
   event: Confirmation;
   deadline: number;
 }
 
-export default function App() {
+const suggestions = [
+  {
+    label: "Bu sayfayı özetle",
+    text: "Bu sayfayı özetle",
+    detail: "Önemli noktaları öğren",
+    icon: "01",
+  },
+  {
+    label: "Brave’de araştır",
+    text: "Brave’de en iyi 3 kablosuz kulaklığı ara, karşılaştır",
+    detail: "Kaynaklarla karşılaştır",
+    icon: "02",
+  },
+  {
+    label: "Yarın 10’da hatırlat",
+    text: "Yarın saat 10’da toplantıyı hatırlat",
+    detail: "Gününü kolaylaştır",
+    icon: "03",
+  },
+  {
+    label: "Bu formu doldur",
+    text: "Bu formu doldur ve gönder",
+    detail: "Göndermeden önce onay iste",
+    icon: "04",
+  },
+];
+
+const clock = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+
+/** Opens the server connection. Tests inject a scripted transport here. */
+export type TransportFactory = (
+  backend: string,
+  onEvent: OnEvent,
+  onStatus: OnStatus,
+  onError: (message: string) => void,
+) => Transport;
+
+export default function App({
+  createTransport = connectSocket,
+}: { createTransport?: TransportFactory } = {}) {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const [ready, setReady] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showStatus, setShowStatus] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const statusRef = useRef(status);
+  const [health, setHealth] = useState<HealthState>({ kind: "checking" });
+  const [healthChecking, setHealthChecking] = useState(false);
+  const healthSeq = useRef(0);
   const [requests, setRequests] = useState<Request[]>([]);
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
@@ -86,6 +134,15 @@ export default function App() {
   const speaker = useSpeaker(settings.backend, reportError);
   const speakerRef = useRef(speaker);
   speakerRef.current = speaker;
+
+  const runHealth = useCallback(async () => {
+    const sequence = ++healthSeq.current;
+    setHealthChecking(true);
+    const result = await checkHealth(settingsRef.current.backend);
+    if (sequence !== healthSeq.current) return;
+    setHealthChecking(false);
+    setHealth(result);
+  }, []);
 
   const activate = (id: string | null) => {
     activeRef.current = id;
@@ -125,19 +182,20 @@ export default function App() {
     if (event.type === "notify") {
       setNotification(event.text);
       if (settingsRef.current.speak)
-        void speakerRef.current.speak(event.spoken, settingsRef.current.mock);
+        void speakerRef.current.speak(event.spoken);
       return;
     }
     if (event.type === "error") {
       if (!event.request_id) {
-        reportError(event.message);
+        const friendly = friendlyError(event.message);
+        reportError(`${friendly.title}. ${friendly.hint}`);
         return;
       }
       if (event.request_id !== activeRef.current) return;
       update(event.request_id, (request) => ({
         ...request,
         status: "error",
-        error: event.message,
+        error: friendlyError(event.message),
       }));
       clearPending();
       activate(null);
@@ -160,7 +218,7 @@ export default function App() {
       clearPending();
       activate(null);
       if (settingsRef.current.speak)
-        void speakerRef.current.speak(event.spoken, settingsRef.current.mock);
+        void speakerRef.current.speak(event.spoken);
     }
     if (event.type === "need_confirm") {
       if (pendingRef.current?.event.call_id === event.call_id) return;
@@ -188,16 +246,8 @@ export default function App() {
       try {
         if (!event.name.startsWith("browser."))
           throw new Error("Panel yalnızca browser.* araçlarını çalıştırır.");
-        if (settingsRef.current.mock)
-          result = {
-            ok: true,
-            data: { text: "Mock sayfa içeriği", mock: true },
-            error: null,
-          };
-        else {
-          if (!tab) throw new Error("Bu görev için aktif sekme bulunamadı.");
-          result = await executeBrowserTool(event.name, event.args, tab.id);
-        }
+        if (!tab) throw new Error("Bu görev için aktif sekme bulunamadı.");
+        result = await executeBrowserTool(event.name, event.args, tab.id);
       } catch (cause) {
         result = {
           ok: false,
@@ -238,33 +288,56 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+  // First run / backend change: check /health before the user types.
+  useEffect(() => {
+    if (!ready) return;
+    healthSeq.current += 1;
+    setHealthChecking(false);
+    setHealth({ kind: "checking" });
+    void runHealth();
+  }, [ready, settings.backend, runHealth]);
   useEffect(() => {
     if (!ready) return;
     generation.current += 1;
     const sessionGeneration = generation.current;
     handledCalls.current.clear();
+    statusRef.current = "connecting";
     const onEvent = (event: ServerEvent) => {
       if (generation.current === sessionGeneration)
         void handlerRef.current(event);
     };
     const onStatus = (next: ConnectionStatus) => {
       if (generation.current !== sessionGeneration) return;
+      const previous = statusRef.current;
+      statusRef.current = next;
       setStatus(next);
+      // Re-check health on (re)connect and whenever a live session drops.
+      if (
+        (next === "connected" ||
+          (next === "disconnected" && previous === "connected"))
+      )
+        void runHealth();
       if (next === "disconnected" && activeRef.current) {
         update(activeRef.current, (request) => ({
           ...request,
           status: "error",
-          error:
-            "Bağlantı koptu. Görev otomatik tekrar edilmedi; yeniden gönderebilirsin.",
+          error: {
+            title: "Sunucu bağlantısı koptu",
+            hint: "Görev otomatik tekrar edilmedi; bağlantı gelince yeniden gönderebilirsin.",
+            detail: "",
+          },
         }));
         clearPending();
         activate(null);
       }
     };
     try {
-      transport.current = settings.mock
-        ? createMockTransport(onEvent, onStatus)
-        : connectSocket(settings.backend, onEvent, onStatus, reportError);
+      transport.current = createTransport(
+        settings.backend,
+        onEvent,
+        onStatus,
+        reportError,
+      );
     } catch {
       setStatus("disconnected");
       reportError("Backend adresine bağlanılamadı. Ayarları kontrol et.");
@@ -274,10 +347,30 @@ export default function App() {
       transport.current?.close();
       transport.current = null;
     };
-  }, [ready, settings.backend, settings.mock, reportError, update]);
+  }, [ready, settings.backend, reportError, update, runHealth, createTransport]);
+  // While the server is down the socket keeps retrying; poll /health too so the
+  // card clears on its own as soon as the backend starts.
+  useEffect(() => {
+    if (health.kind !== "unreachable") return;
+    const timer = setInterval(() => void runHealth(), 5000);
+    return () => clearInterval(timer);
+  }, [health.kind, runHealth]);
   useEffect(() => {
     if (!settings.speak) speakerRef.current.stop();
   }, [settings.speak]);
+
+  const applySettings = async (next: Settings) => {
+    const normalized = { ...next, backend: normalizeBackend(next.backend) };
+    if (
+      busyRef.current &&
+      normalized.backend !== settingsRef.current.backend
+    )
+      throw new Error("Önce mevcut görevi bitir veya iptal et.");
+    await saveSettings(normalized);
+    speakerRef.current.stop();
+    setSettings(normalized);
+    setError("");
+  };
 
   const sendMessage = async (
     text: string,
@@ -287,7 +380,7 @@ export default function App() {
     if (!clean || activeRef.current) return;
     if (status !== "connected") {
       reportError(
-        "Önce backend bağlantısını kur veya ayarlardan mock modunu aç.",
+        "Sunucuya bağlı değilsin. Sunucuyu başlat veya Ayarlar’dan demo modunu aç.",
       );
       return;
     }
@@ -342,7 +435,11 @@ export default function App() {
       update(id, (item) => ({
         ...item,
         status: "error",
-        error: "Mesaj gönderilemedi. Bağlantı kurulduktan sonra tekrar dene.",
+        error: {
+          title: "Mesaj gönderilemedi",
+          hint: "Bağlantı kurulduktan sonra tekrar dene.",
+          detail: "",
+        },
       }));
       activate(null);
     }
@@ -371,8 +468,39 @@ export default function App() {
     activate(null);
     speakerRef.current.stop();
   };
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
+  const showStatusRef = useRef(showStatus);
+  showStatusRef.current = showStatus;
+  const clearChat = () => {
+    if (busyRef.current) return;
+    speakerRef.current.stop();
+    requestsRef.current = [];
+    setRequests([]);
+    setError("");
+    setHint("");
+    setNotification("");
+    composer.current?.focus();
+  };
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // Open dialogs handle Esc themselves (close / reject).
+        if (document.querySelector("dialog[open]")) return;
+        if (showStatusRef.current) {
+          setShowStatus(false);
+          return;
+        }
+        if (["recording", "starting"].includes(recorderRef.current.state)) {
+          recorderRef.current.stop();
+          return;
+        }
+        if (activeRef.current) {
+          event.preventDefault();
+          cancelRef.current();
+        } else if (speakerRef.current.playing) speakerRef.current.stop();
+        return;
+      }
       const target = event.target;
       const interactive =
         target instanceof HTMLElement &&
@@ -419,12 +547,6 @@ export default function App() {
   }, [requests, activeId]);
 
   const highlight = async (ref: number, tab: TabContext | null) => {
-    if (settings.mock) {
-      setHint(
-        `Mock: öğe #${ref} seçildi. Gerçek sayfada değişiklik yapılmadı.`,
-      );
-      return;
-    }
     try {
       if (!tab) throw new Error("Bu cevaba ait sekme bulunamadı.");
       const result = await executeBrowserTool(
@@ -439,68 +561,79 @@ export default function App() {
       );
     }
   };
-  const grantPermission = async () => {
-    const path = "src/panel/permission.html";
-    if (
-      typeof chrome !== "undefined" &&
-      chrome.tabs?.create &&
-      chrome.runtime?.getURL
-    )
-      await chrome.tabs.create({ url: chrome.runtime.getURL(path) });
-    else window.open(`./permission.html`, "_blank", "noopener");
-  };
+
+  const serverDown = health.kind === "unreachable";
+  const llmMissing =
+    health.kind === "ok" && health.health.llm_configured === false;
+  const pillState = serverDown
+      ? "disconnected"
+      : llmMissing
+        ? "warning"
+        : status;
+  const pillText = serverDown
+      ? "Sunucu kapalı"
+      : llmMissing
+        ? "Anahtar yok"
+        : {
+            connected: "Bağlı",
+            connecting: "Bağlanıyor",
+            disconnected: "Kopuk",
+          }[status];
+  const canSend = status === "connected" && !serverDown;
 
   return (
     <main className="app-shell">
       <header className="app-header">
         <div className="brand">
           <span className="brand-mark">
-            <Compass size={22} />
+            <PolarisMark size={20} />
           </span>
           <div>
-            <h1>
-              polaris<span className="brand-dot">.</span>
-            </h1>
-            <span className="brand-subtitle">EVREN ASİSTAN</span>
+            <h1>Polaris</h1>
+            <span className="brand-subtitle">Kişisel asistan</span>
           </div>
         </div>
         <div className="header-actions">
-          <span
-            className={`connection ${status}`}
-            title={
-              settings.mock ? "Örnek veriler kullanılıyor" : settings.backend
-            }
+          <button
+            className={`connection ${pillState}`}
+            aria-expanded={showStatus}
+            aria-label={`Bağlantı durumu: ${pillText}`}
+            onClick={() => setShowStatus((open) => !open)}
           >
             <i />
-            {settings.mock
-              ? "Mock"
-              : {
-                  connected: "Bağlı",
-                  connecting: "Bağlanıyor",
-                  disconnected: "Kopuk",
-                }[status]}
-          </span>
+            {pillText}
+          </button>
+          {requests.length > 0 && (
+            <button
+              className="icon-button"
+              aria-label="Sohbeti temizle"
+              title="Sohbeti temizle"
+              disabled={busy}
+              onClick={clearChat}
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
           <button
             className="icon-button"
             aria-label="Ayarlar"
+            title="Ayarlar"
             onClick={() => setShowSettings(true)}
           >
-            <SettingsIcon size={18} />
+            <SettingsIcon size={17} />
           </button>
         </div>
+        {showStatus && (
+          <StatusPopover
+            settings={settings}
+            status={status}
+            health={health}
+            checking={healthChecking}
+            onRecheck={() => void runHealth()}
+            onClose={() => setShowStatus(false)}
+          />
+        )}
       </header>
-      <div className="context-bar">
-        <span>
-          <ShieldCheck size={13} /> Kontrol sende
-        </span>
-        <span>Ses · Araçlar · Açıklanabilir AI</span>
-      </div>
-      {settings.mock && (
-        <div className="mock-banner">
-          <Sparkles size={13} />
-          <span>Demo modu · Örnek verilerle çalışıyor</span>
-        </div>
-      )}
       {notification && (
         <div className="notice notification" role="status">
           <span>{notification}</span>
@@ -514,56 +647,33 @@ export default function App() {
         </div>
       )}
       <section className="conversation" aria-label="Sohbet">
+        <HealthCard
+            health={health}
+            backend={settings.backend}
+            checking={healthChecking}
+            onRetry={() => void runHealth()}
+          />
         {requests.length === 0 && (
           <div className="welcome">
-            <div className="welcome-symbol">
-              <Sparkles size={30} strokeWidth={1.3} />
+            <div className="welcome-symbol" aria-hidden="true">
+              <span className="halo" />
+              <PolarisMark size={30} />
             </div>
-            <p className="eyebrow">BİRLİKTE, BİR ADIM İLERİ</p>
-            <h2>
-              Ne yapmak
-              <br />
-              istersin?
-            </h2>
+            <p className="eyebrow">Yolunu bulan asistan</p>
+            <h2>Ne yapmak istersin?</h2>
             <p className="welcome-copy">
-              Bir şey sor, sayfayı keşfet veya
-              <br />
-              bir işi bana bırak.
+              Bir şey sor, sayfayı keşfet veya bir işi bana bırak. Her adımın
+              gerekçesini görürsün.
             </p>
             <div className="suggestions">
-              {[
-                {
-                  label: "Bu sayfayı özetle",
-                  text: "Bu sayfayı özetle",
-                  detail: "Önemli noktaları öğren",
-                  icon: "01",
-                },
-                {
-                  label: "Brave’de araştır",
-                  text: "Brave’de en iyi 3 kablosuz kulaklığı ara, karşılaştır",
-                  detail: "Kaynaklarla karşılaştır",
-                  icon: "02",
-                },
-                {
-                  label: "Yarın 10’da hatırlat",
-                  text: "Yarın saat 10’da toplantıyı hatırlat",
-                  detail: "Gününü kolaylaştır",
-                  icon: "03",
-                },
-                {
-                  label: "Bu formu doldur",
-                  text: "Bu formu doldur ve gönder",
-                  detail: "Göndermeden önce onay iste",
-                  icon: "04",
-                },
-              ].map((item) => (
+              {suggestions.map((item) => (
                 <button
                   key={item.icon}
-                  disabled={busy || status !== "connected"}
+                  disabled={busy || !canSend}
                   onClick={() => void sendMessage(item.text)}
                 >
                   <span className="suggestion-number">{item.icon}</span>
-                  <span>
+                  <span className="suggestion-text">
                     <strong>{item.label}</strong>
                     <small>{item.detail}</small>
                   </span>
@@ -572,7 +682,7 @@ export default function App() {
               ))}
             </div>
             <p className="welcome-foot">
-              <CheckCheck size={14} /> Her adımın gerekçesi görünür.
+              <ShieldCheck size={13} /> Önemli işlemler senin onayınla yapılır.
             </p>
           </div>
         )}
@@ -580,13 +690,16 @@ export default function App() {
           <article className="exchange" key={request.id}>
             <div className="user-message">
               <span className="message-label">
-                SEN {request.source === "voice" && <Mic size={11} />}
+                Sen {request.source === "voice" && <Mic size={11} />}
               </span>
               <p>{request.text}</p>
             </div>
             <div className="assistant-message">
               <div className="assistant-label">
-                <span className="mini-mark">✦</span> POLARIS
+                <span className="mini-mark">
+                  <PolarisMark size={12} />
+                </span>
+                Polaris
                 {request.status === "running" && (
                   <LoaderCircle className="spin" size={13} />
                 )}
@@ -594,13 +707,16 @@ export default function App() {
               {request.answer && <Markdown text={request.answer} />}
               {request.status === "running" && !request.answer && (
                 <p className="working">
+                  <span className="dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
                   {request.steps.at(-1)?.decision ?? "İsteğini alıyorum…"}
                 </p>
               )}
-              {request.status === "error" && (
-                <p className="error" role="alert">
-                  {request.error}
-                </p>
+              {request.status === "error" && request.error && (
+                <ErrorNote error={request.error} />
               )}
               {request.status === "cancelled" && (
                 <p className="muted small">Görev iptal edildi.</p>
@@ -617,15 +733,22 @@ export default function App() {
                   live={request.status === "running"}
                 />
               )}
-              {request.spoken && (
-                <button
-                  className="text-button listen"
-                  onClick={() =>
-                    void speaker.speak(request.spoken, settings.mock)
-                  }
-                >
-                  <Volume2 size={13} /> Sesli oku
-                </button>
+              {(request.answer || request.spoken) && (
+                <div className="answer-actions">
+                  {request.answer && (
+                    <CopyButton value={request.answer} label="Cevabı kopyala" />
+                  )}
+                  {request.spoken && (
+                    <button
+                      className="text-button"
+                      onClick={() =>
+                        void speaker.speak(request.spoken)
+                      }
+                    >
+                      <Volume2 size={13} /> Sesli oku
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </article>
@@ -634,7 +757,7 @@ export default function App() {
       </section>
       <footer className="composer-area">
         {error && (
-          <div className="error error-banner" role="alert">
+          <div className="error-banner" role="alert">
             <span>{error}</span>
             <button
               className="icon-button"
@@ -654,23 +777,32 @@ export default function App() {
           <button
             className="text-button"
             onClick={() =>
-              void grantPermission().catch(() =>
-                reportError("İzin sekmesi açılamadı."),
-              )
+              void recorder
+                .openPermissionPage()
+                .catch(() => reportError("İzin sekmesi açılamadı."))
             }
           >
             Mikrofon izni ver
           </button>
         )}
-        {activeId && (
-          <button className="cancel-task" onClick={cancel}>
-            <CircleStop size={14} /> Görevi iptal et
-          </button>
-        )}
-        {speaker.playing && (
-          <button className="text-button" onClick={speaker.stop}>
-            <CircleStop size={14} /> Sesli okumayı durdur
-          </button>
+        {(activeId || speaker.playing) && (
+          <div className="task-actions">
+            {activeId && (
+              <button
+                className="cancel-task"
+                aria-label="Görevi iptal et"
+                onClick={cancel}
+              >
+                <CircleStop size={14} /> Görevi iptal et
+                <kbd>Esc</kbd>
+              </button>
+            )}
+            {speaker.playing && (
+              <button className="cancel-task" onClick={speaker.stop}>
+                <CircleStop size={14} /> Sesli okumayı durdur
+              </button>
+            )}
+          </div>
         )}
         <form
           className={`composer ${recorder.state === "recording" ? "recording" : ""}`}
@@ -735,30 +867,32 @@ export default function App() {
               <Mic size={17} />
             </button>
             <span className="input-hint" role="status">
-              {
+              {recorder.state === "recording" ? (
+                <>
+                  <span className="rec-dot" aria-hidden="true" />
+                  <span className="rec-time">{clock(recorder.elapsed)}</span>
+                  Dinliyorum… bırakınca gönder
+                </>
+              ) : (
                 {
                   idle: "Bas-konuş · Space",
                   starting: "Mikrofon açılıyor…",
-                  recording: "Dinliyorum… bırakınca gönder",
                   transcribing: "Ses yazıya çevriliyor…",
                 }[recorder.state]
-              }
+              )}
             </span>
             <button
               className="send-button"
               type="submit"
-              disabled={!draft.trim() || busy || status !== "connected"}
+              disabled={!draft.trim() || busy || !canSend}
               aria-label="Mesajı gönder"
             >
-              <ArrowUp size={19} />
+              <ArrowUp size={18} />
             </button>
           </div>
         </form>
         <p className="footer-note">
-          <AudioLines size={11} />{" "}
-          {settings.mock
-            ? "Mock gösterimi · Gerçek işlem yapılmaz"
-            : "Önemli işlemler için onayın gerekir."}
+          Shift+Enter yeni satır · Esc iptal · Önemli işlemler onayına sunulur
         </p>
       </footer>
       {showSettings && (
@@ -766,22 +900,7 @@ export default function App() {
           current={settings}
           busy={busy}
           onClose={() => setShowSettings(false)}
-          onSave={async (next) => {
-            const normalized = {
-              ...next,
-              backend: normalizeBackend(next.backend),
-            };
-            if (
-              busyRef.current &&
-              (normalized.backend !== settings.backend ||
-                normalized.mock !== settings.mock)
-            )
-              throw new Error("Önce mevcut görevi bitir veya iptal et.");
-            await saveSettings(normalized);
-            speakerRef.current.stop();
-            setSettings(normalized);
-            setError("");
-          }}
+          onSave={applySettings}
         />
       )}
       {pending && (

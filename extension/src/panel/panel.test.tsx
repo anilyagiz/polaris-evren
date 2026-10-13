@@ -44,40 +44,90 @@ beforeEach(() => {
     this.setAttribute("open", "");
   };
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  vi.stubGlobal(
+    "fetch",
+    healthFetch({ ok: true, llm_model: "deepseek-chat", llm_configured: true }),
+  );
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+function healthFetch(body: unknown, ok = true) {
+  return vi.fn(async (_url: string, _init?: RequestInit) => ({
+    ok,
+    status: ok ? 200 : 500,
+    json: async () => body,
+  }));
+}
+const storeSettings = () =>
+  localStorage.setItem(
+    "polaris-panel-settings",
+    JSON.stringify({ backend: "http://localhost:8000", speak: false }),
+  );
+const stubTabs = () =>
+  vi.stubGlobal("chrome", {
+    tabs: {
+      query: vi.fn(async () => [
+        { id: 123, url: "https://example.com", title: "Example" },
+      ]),
+    },
+  });
 const mountApp = async () => {
   render(<App />);
   await act(async () => {
     await Promise.resolve();
   });
 };
+/** Scripted session (shared/fixtures) injected the way tests inject transports. */
+const mountScripted = async () => {
+  storeSettings();
+  stubTabs();
+  render(
+    <App
+      createTransport={(_backend, onEvent, onStatus) =>
+        createMockTransport(onEvent, onStatus)
+      }
+    />,
+  );
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
+const clickAndRun = async (name: RegExp | string, ms: number) => {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+};
 
 describe("Panel acceptance flows", () => {
-  it("plays a complete mock session and highlights without touching a real tab", async () => {
-    await mountApp();
-    fireEvent.click(screen.getByRole("button", { name: /Bu sayfayı özetle/ }));
-    await act(async () => {
-      vi.advanceTimersByTime(3500);
-    });
+  it("plays a complete scripted session and highlights evidence on the request's tab", async () => {
+    await mountScripted();
+    await clickAndRun(/Bu sayfayı özetle/, 3500);
     expect(screen.getByText("Sayfanın kısa özeti")).toBeTruthy();
     expect(screen.getByText("Cevap kontrol edildi")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Öğe #21" }));
-    expect(screen.getByText(/Mock: öğe #21 seçildi/)).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Öğe #21" }));
+      await Promise.resolve();
+    });
+    expect(executeBrowserTool).toHaveBeenCalledWith(
+      "browser.highlight",
+      { ref: 21 },
+      123,
+    );
     expect(
       screen.queryByRole("button", { name: "Görevi iptal et" }),
     ).toBeNull();
   });
   it("rejects a form and shows a final response only after the decision", async () => {
-    await mountApp();
-    fireEvent.click(screen.getByRole("button", { name: /Bu formu doldur/ }));
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
+    await mountScripted();
+    await clickAndRun(/Bu formu doldur/, 3000);
     expect(screen.getByRole("button", { name: "Onayla" })).toBeTruthy();
     expect(screen.queryByText("Demo tamamlandı.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reddet" }));
@@ -87,12 +137,15 @@ describe("Panel acceptance flows", () => {
     expect(screen.getByText("Form gönderilmedi.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Onayla" })).toBeNull();
   });
-  it("cancels an active session and ignores all late mock steps", async () => {
-    await mountApp();
-    fireEvent.click(screen.getByRole("button", { name: /Bu sayfayı özetle/ }));
+  it("cancels an active session and ignores all late scripted steps", async () => {
+    await mountScripted();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Bu sayfayı özetle/ }));
+      await Promise.resolve();
+    });
     fireEvent.click(screen.getByRole("button", { name: "Görevi iptal et" }));
     await act(async () => {
-      vi.advanceTimersByTime(3500);
+      await vi.advanceTimersByTimeAsync(3500);
     });
     expect(screen.getByText("Görev iptal edildi.")).toBeTruthy();
     expect(screen.queryByText("Sayfanın kısa özeti")).toBeNull();
@@ -193,14 +246,7 @@ class LiveSocket {
 }
 
 const mountLive = async () => {
-  localStorage.setItem(
-    "polaris-panel-settings",
-    JSON.stringify({
-      backend: "http://localhost:8000",
-      mock: false,
-      speak: false,
-    }),
-  );
+  storeSettings();
   vi.stubGlobal("WebSocket", LiveSocket);
   vi.stubGlobal("chrome", {
     tabs: {
@@ -338,5 +384,151 @@ describe("Live protocol wiring", () => {
     expect(
       socket.sent.some((frame) => frame.type === "cancel" && frame.id === id),
     ).toBe(true);
+  });
+});
+
+describe("First run and health UX", () => {
+  it("checks the backend on open and shows how to start it when it is down", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    vi.stubGlobal("WebSocket", LiveSocket);
+    await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/health",
+      expect.anything(),
+    );
+    expect(screen.getByText("Polaris sunucusu çalışmıyor")).toBeTruthy();
+    expect(screen.getByText("start-polaris.cmd")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Komutu kopyala" })).toBeTruthy();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /Bu sayfayı özetle/,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(screen.queryByText(/Demo/)).toBeNull();
+    // The card clears on its own once the server comes up.
+    vi.stubGlobal("fetch", healthFetch({ ok: true, llm_configured: true }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.queryByText("Polaris sunucusu çalışmıyor")).toBeNull();
+  });
+  it("explains a missing LLM key and shows model/CUA in the status popover", async () => {
+    storeSettings();
+    vi.stubGlobal(
+      "fetch",
+      healthFetch({
+        ok: true,
+        llm_model: "deepseek-chat",
+        llm_configured: false,
+        cua_enabled: true,
+        stt_ready: true,
+        future_field: { nested: 1 },
+      }),
+    );
+    vi.stubGlobal("WebSocket", LiveSocket);
+    await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Yapay zekâ anahtarı ayarlı değil")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Bağlantı durumu/ }));
+    const popover = screen.getByRole("dialog", { name: "Bağlantı durumu" });
+    expect(popover.textContent).toContain("deepseek-chat");
+    expect(popover.textContent).toContain("Masaüstü (CUA)Açık");
+    expect(popover.textContent).toContain("Ses tanımaHazır");
+    expect(popover.textContent).not.toContain("Brave arama");
+  });
+});
+
+describe("Conversation UX", () => {
+  it("shows LLM errors in friendly Turkish with the raw detail tucked away", async () => {
+    const socket = await mountLive();
+    const id = socket.sent.find((frame) => frame.type === "user_msg")!
+      .id as string;
+    act(() =>
+      socket.receive({
+        type: "error",
+        request_id: id,
+        message:
+          "LLM kimlik doğrulaması reddedildi; DEEPSEEK_API_KEY değerini kontrol et.",
+      }),
+    );
+    expect(screen.getByText("Yapay zekâ anahtarı kabul edilmedi")).toBeTruthy();
+    expect(screen.getByText("Ayrıntı")).toBeTruthy();
+  });
+  it("cancels the running task with Esc", async () => {
+    const socket = await mountLive();
+    const id = socket.sent.find((frame) => frame.type === "user_msg")!
+      .id as string;
+    act(() => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(
+      socket.sent.some((frame) => frame.type === "cancel" && frame.id === id),
+    ).toBe(true);
+    expect(screen.getByText("Görev iptal edildi.")).toBeTruthy();
+  });
+  it("marks failed tool steps in the timeline", async () => {
+    const socket = await mountLive();
+    const id = socket.sent.find((frame) => frame.type === "user_msg")!
+      .id as string;
+    act(() =>
+      socket.receive({
+        type: "trace",
+        request_id: id,
+        step: {
+          agent: "executor",
+          decision: "Araç hatası: araç zaman aşımı: browser.read (20 sn)",
+          why: "araç zaman aşımı: browser.read (20 sn)",
+          evidence: [],
+          confidence: null,
+          tool: { name: "browser.read", args: {} },
+          scores: null,
+          verdict: null,
+          latency_ms: 20000,
+          tokens: null,
+          ts: "2026-10-13T14:02:11+03:00",
+        },
+      }),
+    );
+    expect(screen.getByText("Araç başarısız")).toBeTruthy();
+    expect(screen.getByText("1 araç hatası")).toBeTruthy();
+  });
+  it("copies an answer and clears the chat", async () => {
+    const writeText = vi.fn(async (_value: string) => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const socket = await mountLive();
+    const id = socket.sent.find((frame) => frame.type === "user_msg")!
+      .id as string;
+    act(() =>
+      socket.receive({
+        type: "final",
+        request_id: id,
+        answer: "Uzun **cevap**",
+        spoken: "",
+        citations: [],
+      }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cevabı kopyala" }));
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith("Uzun **cevap**");
+    fireEvent.click(screen.getByRole("button", { name: "Sohbeti temizle" }));
+    expect(screen.queryByText("Sayfayı oku")).toBeNull();
+    expect(screen.getByText("Ne yapmak istersin?")).toBeTruthy();
   });
 });

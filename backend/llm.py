@@ -8,6 +8,7 @@ timeline can show them.
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import logging
 import time
@@ -189,7 +190,7 @@ class LLMClient:
         last: Exception | None = None
         for attempt in range(_MAX_CALL_ATTEMPTS):
             try:
-                return await self._sdk().chat.completions.create(**kwargs)
+                return await self._sdk().chat.completions.create(**_with_thinking(kwargs, self.model))
             except LLMError:
                 raise
             except (APIError, AsyncTimeout, asyncio.TimeoutError) as exc:
@@ -199,6 +200,14 @@ class LLMClient:
                 delay = _BACKOFF_S[min(attempt, len(_BACKOFF_S) - 1)]
                 logger.warning("LLM geçici hata (deneme %s), %.1f sn sonra tekrar: %s", attempt + 1, delay, exc)
                 await asyncio.sleep(delay)
+        fallback = (os.environ.get("LLM_FALLBACK_MODEL") or "").strip()
+        status = getattr(last, "status_code", None)
+        if fallback and kwargs.get("model") != fallback and status not in (401, 403):
+            logger.warning(
+                "LLM modeli %s başarısız (%s); yedek modele geçiliyor: %s",
+                kwargs.get("model"), _describe_error(last), fallback,
+            )
+            return await self._create(**{**kwargs, "model": fallback})
         raise LLMError(_describe_error(last)) from last
 
     # -- entry points -----------------------------------------------------
@@ -289,7 +298,78 @@ class LLMClient:
                         parse_error=f"arguments JSON okunamadı: {exc}",
                     )
                 )
-        return ToolMessage(content=(message.content or "").strip(), tool_calls=calls), usage
+        content = (message.content or "").strip()
+        if not calls and tools and content:
+            # Some models (e.g. Gemma behind the EVREN gateway) write the call as
+            # JSON text instead of using native tool_calls; recover it.
+            calls = _text_tool_calls(content, tools)
+            if calls:
+                logger.info("Metin içindeki araç çağrısı ayrıştırıldı: %s", [c.name for c in calls])
+                content = ""
+        return ToolMessage(content=content, tool_calls=calls), usage
+
+
+def _with_thinking(kwargs: dict[str, Any], primary_model: str) -> dict[str, Any]:
+    """LLM_THINKING=off disables hidden reasoning on the primary model (Gemma: ~5x faster)."""
+
+    if (os.environ.get("LLM_THINKING") or "").strip().lower() not in ("off", "0", "false", "no"):
+        return kwargs
+    if kwargs.get("model") != primary_model:
+        return kwargs
+    extra = dict(kwargs.get("extra_body") or {})
+    extra.setdefault("chat_template_kwargs", {"enable_thinking": False})
+    return {**kwargs, "extra_body": extra}
+
+
+def _text_tool_calls(content: str, tools: Sequence[dict[str, Any]]) -> list[ToolCall]:
+    """Parse ``{"name": ..., "arguments": {...}}`` (or a list of them) written as text."""
+
+    names: set[str] = set()
+    for tool in tools:
+        fn = tool.get("function", {}) if isinstance(tool, dict) else {}
+        if fn.get("name"):
+            names.add(str(fn["name"]))
+    if not names:
+        return []
+    import re
+
+    candidates: list[Any] = []
+    text = content.strip()
+    for block in re.findall(r"```(?:json)?\s*(.*?)```", text, flags=re.S) or [text]:
+        try:
+            candidates.append(json.loads(block))
+            continue
+        except (json.JSONDecodeError, ValueError):
+            pass
+        try:
+            candidates.append(_loads_lenient(block))
+        except (json.JSONDecodeError, ValueError):
+            continue
+    calls: list[ToolCall] = []
+    for item in candidates:
+        for obj in item if isinstance(item, list) else [item]:
+            if not isinstance(obj, dict):
+                continue
+            if isinstance(obj.get("function"), dict):
+                obj = obj["function"]
+            name = obj.get("name") or obj.get("tool")
+            if not isinstance(name, str):
+                continue
+            name = name.strip()
+            if name not in names and name.replace(".", "__") in names:
+                name = name.replace(".", "__")
+            if name not in names:
+                continue
+            args = obj.get("arguments", obj.get("args", obj.get("parameters", {})))
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, ValueError):
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+            calls.append(ToolCall(id=f"text_{len(calls)}", name=name, args=args))
+    return calls
 
 
 def _loads_lenient(content: str) -> dict[str, Any]:

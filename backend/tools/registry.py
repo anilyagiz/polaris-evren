@@ -24,7 +24,8 @@ Route = Literal["chat", "web_search", "browser_task", "desktop_task", "personal"
 #: user's explicit confirmation, even though the tool itself is "safe".
 RISKY_PATTERN = re.compile(
     r"gönder|satın|öde|sipariş|sil|onayla|kaydet|iptal|abone|kaldır|transfer|havale|"
-    r"submit|buy|pay|order|delete|send|confirm|purchase|checkout|subscribe|remove|cancel|transfer|withdraw",
+    r"submit|buy|pay|order|delete|send|confirm|purchase|checkout|subscribe|remove|cancel|transfer|withdraw|"
+    r"hesab[ıi]\s*kapat|close\s*account|ödeme|paylaş|share|publish|yayınla",
     re.IGNORECASE,
 )
 
@@ -233,6 +234,21 @@ def find_element(snapshot: dict[str, Any] | None, ref: Any) -> dict[str, Any] | 
     return None
 
 
+_SEARCH_FIELD = re.compile(r"\b(ara|arama|search|sorgu|bul|query|find)\b|^q$", re.IGNORECASE)
+
+
+def _is_search_field(element: dict[str, Any]) -> bool:
+    """A search box: role searchbox, or a textbox/combobox labelled like a search."""
+
+    role = str(element.get("role") or "").lower()
+    if role == "searchbox":
+        return True
+    if role not in {"textbox", "combobox", "input", ""}:
+        return False
+    label = " ".join(str(element.get(k) or "") for k in ("name", "placeholder")).strip()
+    return bool(label) and bool(_SEARCH_FIELD.search(label)) and not is_risky_label(label)
+
+
 def needs_confirm(tool: Tool, args: dict[str, Any], snapshot: dict[str, Any] | None) -> str | None:
     """Return a Turkish confirmation summary when the gate must fire.
 
@@ -248,6 +264,11 @@ def needs_confirm(tool: Tool, args: dict[str, Any], snapshot: dict[str, Any] | N
         return f"`{tool.name}` aracı onay gerektiriyor. Çalıştırılsın mı?"
 
     if tool.name == "browser.type" and is_truthy(args.get("submit")):
+        # Submitting a search box is harmless; everything else (forms, comments,
+        # messages, checkout fields) needs the user's OK.
+        target = find_element(snapshot, args.get("ref"))
+        if target is not None and _is_search_field(target):
+            return None
         return "Formdaki metin gönderilsin mi?"
 
     if tool.name not in {"browser.click", "desktop.click"}:
@@ -289,3 +310,123 @@ def click_needs_confirm(tool: Tool, args: dict[str, Any], snapshot: dict[str, An
     """Backwards-compatible alias for :func:`needs_confirm`."""
 
     return needs_confirm(tool, args, snapshot)
+
+
+# ---------------------------------------------------------------------------
+# Sensitive-field detection (trace masking) and argument validation.
+# ---------------------------------------------------------------------------
+
+#: Broader than `_SECRET_FIELD`: used only to *mask* typed text in traces, so a
+#: false positive just hides a harmless value.
+_SENSITIVE_FIELD = re.compile(
+    r"password|passwd|passcode|parola|şifre|sifre|\bpin\b|cvv|cvc|kart|card|credit|\bcc\b|cc-|iban|\botp\b",
+    re.IGNORECASE,
+)
+
+
+def _fold(text: str) -> str:
+    # Python's casefold maps "İ" to "i̇" (two code points); fold Turkish dotted I first.
+    return text.replace("İ", "i").replace("I", "i").lower()
+
+
+def is_sensitive_element(element: dict[str, Any] | None) -> bool:
+    """Does a snapshot element look like a password / card / CVV field?"""
+
+    if not isinstance(element, dict):
+        return False
+    haystack = " ".join(
+        str(element.get(key) or "") for key in ("role", "name", "type", "autocomplete", "placeholder")
+    )
+    return bool(_SENSITIVE_FIELD.search(_fold(haystack)))
+
+
+_JSON_TYPE_TR = {
+    "string": "metin",
+    "integer": "tam sayı",
+    "number": "sayı",
+    "boolean": "true/false",
+    "array": "liste",
+    "object": "nesne",
+}
+_BOOL_STRINGS = frozenset({"true", "false", "1", "0", "yes", "no", "on", "off", "evet", "hayır", "hayir", "tamam"})
+_INT_RE = re.compile(r"^\s*-?\d+\s*$")
+_NUM_RE = re.compile(r"^\s*-?\d+(\.\d+)?\s*$")
+
+
+def _type_ok(expected: str, value: Any) -> bool:
+    """Basic JSON-schema type check, lenient where LLMs commonly stringify."""
+
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return True
+        if isinstance(value, float):
+            return value.is_integer()
+        return isinstance(value, str) and bool(_INT_RE.match(value))
+    if expected == "number":
+        if isinstance(value, bool):
+            return False
+        return isinstance(value, (int, float)) or (isinstance(value, str) and bool(_NUM_RE.match(value)))
+    if expected == "boolean":
+        if isinstance(value, bool):
+            return True
+        if isinstance(value, int):
+            return value in (0, 1)
+        return isinstance(value, str) and value.strip().lower() in _BOOL_STRINGS
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "null":
+        return value is None
+    return True  # unknown type keyword: do not block
+
+
+def validate_args(tool: Tool, args: Any) -> str | None:
+    """Validate model-provided arguments against the tool's JSON schema.
+
+    Checks required fields, basic types, `enum` and array item types.  Extra
+    properties (including the executor's `why`) are ignored.  Returns a Turkish
+    error the executor can act on, or `None` when the arguments are usable.
+    """
+
+    if not isinstance(args, dict):
+        return f"`{tool.name}` argümanları bir JSON nesnesi olmalı."
+    schema = tool.parameters or {}
+    props: dict[str, Any] = schema.get("properties") or {}
+    problems: list[str] = []
+
+    for name in schema.get("required") or []:
+        if name == "why":
+            continue
+        if name not in args or args[name] is None or (isinstance(args[name], str) and not args[name].strip()):
+            problems.append(f"`{name}` zorunlu ama eksik")
+
+    for name, spec in props.items():
+        if name == "why" or name not in args or not isinstance(spec, dict):
+            continue
+        value = args[name]
+        if value is None and name not in (schema.get("required") or []):
+            continue
+        expected = spec.get("type")
+        types = expected if isinstance(expected, list) else [expected] if expected else []
+        if types and not any(_type_ok(t, value) for t in types):
+            wanted = " veya ".join(_JSON_TYPE_TR.get(t, str(t)) for t in types)
+            problems.append(f"`{name}` {wanted} olmalı (gelen: {type(value).__name__})")
+            continue
+        enum = spec.get("enum")
+        if isinstance(enum, list) and value not in enum:
+            allowed = ", ".join(repr(v) for v in enum)
+            problems.append(f"`{name}` şunlardan biri olmalı: {allowed}")
+            continue
+        items = spec.get("items")
+        if isinstance(value, list) and isinstance(items, dict) and items.get("type"):
+            if not all(_type_ok(items["type"], v) for v in value):
+                problems.append(f"`{name}` öğeleri {_JSON_TYPE_TR.get(items['type'], items['type'])} olmalı")
+
+    if not problems:
+        return None
+    return f"Geçersiz argümanlar ({tool.name}): " + "; ".join(problems) + ". Argümanları düzeltip tekrar dene."

@@ -9,18 +9,32 @@
     "48": "public/icons/icon-48.png",
     "128": "public/icons/icon-128.png"
   },
-  "permissions": ["sidePanel", "storage", "scripting", "tabs", "activeTab"],
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
   "host_permissions": [
     "<all_urls>",
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
-  "side_panel": { "default_path": "src/panel/index.html" },
-  "background": { "service_worker": "src/background.ts", "type": "module" },
+  "side_panel": {
+    "default_path": "src/panel/index.html"
+  },
+  "background": {
+    "service_worker": "src/background.ts",
+    "type": "module"
+  },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content/index.ts"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content/index.ts"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -33,6 +47,6 @@
     }
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000 http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*"
   }
 }

@@ -1,0 +1,69 @@
+<#
+.SYNOPSIS
+  Polaris tepsi uygulamasini tek dosyalik Polaris.exe olarak derler (PyInstaller).
+
+.DESCRIPTION
+  Yalnizca tray/ kodu + pystray + Pillow paketlenir; backend PAKETLENMEZ.
+  Exe calisirken kendi klasorunden yukari dogru backend\ klasorunu arar ve
+  o kokteki .venv\Scripts\pythonw.exe ile backend'i baslatir. Bu yuzden
+  Polaris.exe'yi repo kokune veya surum (release) kokune kopyalayin.
+
+  Cikti : tray\dist\Polaris.exe   (+ tray\dist\polaris.ico)
+  Ayrica: tray\Polaris.vbs (PyInstaller olmadan konsolsuz baslatma yedegi)
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File tray\build.ps1
+  powershell -ExecutionPolicy Bypass -File tray\build.ps1 -Smoke
+#>
+param(
+    [switch]$Smoke,          # derleme sonrasi: Polaris.exe --smoke
+    [switch]$SkipInstall     # pip install adimini atla
+)
+$ErrorActionPreference = 'Stop'
+
+$Root = Split-Path -Parent $PSScriptRoot
+$Py   = Join-Path $Root '.venv\Scripts\python.exe'
+if (-not (Test-Path $Py)) { throw ".venv bulunamadi ($Py). Once scripts\setup.ps1 calistirin." }
+
+$Dist = Join-Path $PSScriptRoot 'dist'
+$Work = Join-Path $env:TEMP 'polaris-tray-build'
+$Ico  = Join-Path $Dist 'polaris.ico'
+New-Item -ItemType Directory -Force $Dist | Out-Null
+
+if (-not $SkipInstall) {
+    Write-Host '[tray] pystray, Pillow, pyinstaller kuruluyor...'
+    & $Py -m pip install --disable-pip-version-check -q -r (Join-Path $Root 'backend\requirements-tray.txt') pyinstaller
+    if ($LASTEXITCODE -ne 0) { throw 'pip install basarisiz' }
+}
+
+Write-Host '[tray] ikon olusturuluyor...'
+Push-Location $Root
+try {
+    & $Py -c "from pathlib import Path; from tray.icons import write_ico; write_ico(Path(r'$Ico'))"
+    if ($LASTEXITCODE -ne 0) { throw 'ikon olusturulamadi' }
+
+    Write-Host '[tray] PyInstaller...'
+    $excludes = @('numpy','scipy','pandas','torch','onnxruntime','ctranslate2','faster_whisper','av',
+                  'fastapi','uvicorn','starlette','pydantic','openai','httpx','backend','tkinter',
+                  'pytest','cv2','matplotlib','IPython')
+    $argsList = @('-m','PyInstaller','--noconfirm','--clean','--onefile','--windowed',
+                  '--name','Polaris','--icon',$Ico,
+                  '--distpath',$Dist,'--workpath',$Work,'--specpath',$Work,
+                  '--paths',$Root,'--hidden-import','pystray._win32')
+    foreach ($m in $excludes) { $argsList += @('--exclude-module', $m) }
+    $argsList += (Join-Path $PSScriptRoot 'launch.pyw')
+    & $Py @argsList
+    if ($LASTEXITCODE -ne 0) { throw 'PyInstaller basarisiz' }
+} finally { Pop-Location }
+
+$Exe = Join-Path $Dist 'Polaris.exe'
+$size = [math]::Round((Get-Item $Exe).Length / 1MB, 1)
+Write-Host "[tray] Hazir: $Exe ($size MB)"
+Write-Host '[tray] Surum paketine kopyalayin: <kok>\Polaris.exe (backend\ ve .venv\ ile ayni klasor).'
+
+if ($Smoke) {
+    Write-Host '[tray] Smoke: Polaris.exe --smoke (cikti backend\data\logs\tray.log icinde)'
+    $p = Start-Process -FilePath $Exe -ArgumentList '--smoke' -PassThru -Wait
+    if ($p.ExitCode -ne 0) { throw "Smoke basarisiz (cikis kodu $($p.ExitCode))" }
+    Write-Host '[tray] Smoke OK'
+}

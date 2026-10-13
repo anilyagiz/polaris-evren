@@ -11,6 +11,7 @@ connection stays alive and every request is answered with an `error` frame.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import importlib
 import inspect
 import json
@@ -43,6 +44,34 @@ logger = logging.getLogger(__name__)
 JUDGE_QUESTION_TIMEOUT_S = 60.0
 #: Extra slack on top of `settings.tool_timeout_s` for handler-level protection.
 TOOL_TIMEOUT_MARGIN_S = 5.0
+#: Part of the request budget kept for the Responder so a request that runs out
+#: of time still ends with a normal `final` inside the budget.
+RESPONDER_RESERVE_S = 30.0
+#: Share of the budget the reserve may take at most (small test budgets).
+RESPONDER_RESERVE_RATIO = 0.25
+#: Judge `revise` feedback this similar to the previous one ends the revisions.
+REVISE_SIMILARITY = 0.85
+#: Prefix of an answer produced after the budget ran out.
+PARTIAL_PREFIX = "Süre doldu, eldeki sonuç:"
+
+
+class BudgetExceeded(Exception):
+    """The request budget ran out (never a user cancel)."""
+
+
+def _norm_feedback(text: str | None) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def is_repeated_feedback(previous: str | None, current: str | None) -> bool:
+    """Is the judge asking for the same revision again (identical / near-identical)?"""
+
+    a, b = _norm_feedback(previous), _norm_feedback(current)
+    if not a or not b:
+        return a == b and previous is not None
+    if a == b:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= REVISE_SIMILARITY
 
 AGENT_SPECS: tuple[tuple[str, str, str], ...] = (
     ("router", ".agents.router", "RouterAgent"),
@@ -81,6 +110,21 @@ class _ToolRun:
     summary: str
     evidence: list[str]
     snapshot: dict[str, Any] | None
+
+
+async def _within(coro: Any, deadline: float) -> Any:
+    """Await `coro` but never past `deadline`; raises BudgetExceeded when it would."""
+
+    left = deadline - time.monotonic()
+    if left <= 0:
+        coro.close()
+        raise BudgetExceeded()
+    try:
+        return await asyncio.wait_for(coro, timeout=left)
+    except asyncio.TimeoutError:
+        if time.monotonic() >= deadline - 0.05:
+            raise BudgetExceeded() from None
+        raise  # a timeout raised inside the agent itself
 
 
 def _load_agent(module_path: str, class_name: str, client: LLMClient) -> Any:
@@ -211,6 +255,9 @@ class Orchestrator:
         self._task_request_id: str | None = None
         self._reminder_task: asyncio.Task[None] | None = None
         self._announced_cancels: set[str] = set()
+        #: Latest page snapshot of the running request; the trace emitter uses it
+        #: to mask text typed into password/card fields (one request at a time).
+        self._latest_snapshot: dict[str, Any] | None = None
 
     # -- lifecycle --------------------------------------------------------
     async def start(self) -> None:
@@ -399,7 +446,10 @@ class Orchestrator:
         source: str,
         tab: dict[str, Any] | None,
     ) -> None:
-        emit = make_emitter(self._send, self.store, request_id)
+        self._latest_snapshot = None
+        emit = make_emitter(
+            self._send, self.store, request_id, snapshot_provider=lambda: self._latest_snapshot
+        )
         log = _RequestLogger(logger, {"request_id": request_id})
         history: list[HistoryEntry] = []
         snapshot: dict[str, Any] | None = None
@@ -408,10 +458,17 @@ class Orchestrator:
         revisions = 0
         calls_used = 0
         asked_user = False
+        route = "chat"
+        goal = text
         # The request budget is a *total*, so the deadline starts here — before
         # memory lookup, router and planner — and every later step is charged to
-        # it (INTERFACES.md §10.3: "toplam 90 sn").
-        deadline = time.monotonic() + float(self._settings.request_budget_s)
+        # it (INTERFACES.md §10.3).  The last part of the budget is reserved for
+        # the Responder: work stops at `work_deadline`, the answer is due by
+        # `deadline`, so a slow model still yields a normal `final`.
+        budget = float(self._settings.request_budget_s)
+        started = time.monotonic()
+        deadline = started + budget
+        work_deadline = deadline - min(RESPONDER_RESERVE_S, budget * RESPONDER_RESERVE_RATIO)
 
         try:
             log.info("İstek işleniyor (source=%s, %d karakter)", source, len(text))
@@ -427,20 +484,27 @@ class Orchestrator:
 
             router = self._require(self.router, "router")
             responder = self._require(self.responder, "responder")
-            memories = await self._search_memories(text, request_id, tab, emit, deadline=deadline)
-            decision = await router.route(user_text=text, tab=tab, memories=memories, emit=emit)
+            memories = await self._search_memories(
+                text, request_id, tab, emit, deadline=work_deadline
+            )
+            decision = await _within(
+                router.route(user_text=text, tab=tab, memories=memories, emit=emit), work_deadline
+            )
             route = decision.route
             log.info("Route: %s (%.2f) — %s", route, decision.confidence, decision.why)
 
             if route == "chat":
-                final = await responder.respond(
-                    goal=text,
-                    route="chat",
-                    result_summary="",
-                    evidence=[],
-                    snapshot=None,
-                    history=[],
-                    emit=emit,
+                final = await _within(
+                    responder.respond(
+                        goal=text,
+                        route="chat",
+                        result_summary="",
+                        evidence=[],
+                        snapshot=None,
+                        history=[],
+                        emit=emit,
+                    ),
+                    deadline,
                 )
                 await self._send_final(request_id, final)
                 return
@@ -449,10 +513,12 @@ class Orchestrator:
             executor = self._require(self.executor, "executor")
             judge = self._require(self.judge, "judge")
 
-            plan = await planner.plan(
-                user_text=text, route=route, tab=tab, memories=memories, emit=emit
+            plan = await _within(
+                planner.plan(user_text=text, route=route, tab=tab, memories=memories, emit=emit),
+                work_deadline,
             )
             goal = plan.goal or text
+            last_revise_feedback: str | None = None
 
             while True:
                 run = await self._run_tool_loop(
@@ -465,7 +531,7 @@ class Orchestrator:
                     history=history,
                     snapshot=snapshot,
                     calls_used=calls_used,
-                    deadline=deadline,
+                    deadline=work_deadline,
                     emit=emit,
                     log=log,
                 )
@@ -474,12 +540,28 @@ class Orchestrator:
                 summary = run.summary or summary
                 evidence = run.evidence or evidence
 
-                verdict = await judge.judge(
-                    goal=goal, plan=plan, history=history, snapshot=snapshot, emit=emit
+                if time.monotonic() >= work_deadline:
+                    raise BudgetExceeded()
+                verdict = await _within(
+                    judge.judge(goal=goal, plan=plan, history=history, snapshot=snapshot, emit=emit),
+                    work_deadline,
                 )
                 log.info("Judge: %s — %s", verdict.verdict, verdict.feedback)
 
+                if verdict.verdict == "revise" and is_repeated_feedback(
+                    last_revise_feedback, verdict.feedback
+                ):
+                    log.info("Judge aynı revizyonu tekrar istedi; revizyon durduruldu")
+                    await self._emit_quiet(
+                        emit,
+                        "system",
+                        "Revizyon durduruldu",
+                        "Değerlendirici aynı düzeltmeyi tekrar istedi; eldeki sonuçla yanıtlanıyor.",
+                    )
+                    break
+
                 if verdict.verdict == "revise" and revisions < int(self._settings.max_revisions):
+                    last_revise_feedback = verdict.feedback
                     revisions += 1
                     history.append(
                         HistoryEntry(
@@ -499,17 +581,34 @@ class Orchestrator:
                     continue
                 break
 
-            final = await responder.respond(
+            final = await _within(
+                responder.respond(
+                    goal=goal,
+                    route=route,
+                    result_summary=summary,
+                    evidence=evidence,
+                    snapshot=snapshot,
+                    history=history,
+                    emit=emit,
+                ),
+                deadline,
+            )
+            await self._send_final(request_id, final)
+
+        except BudgetExceeded:
+            await self._finish_partial(
+                request_id,
                 goal=goal,
                 route=route,
-                result_summary=summary,
+                summary=summary,
                 evidence=evidence,
                 snapshot=snapshot,
                 history=history,
                 emit=emit,
+                deadline=deadline,
+                elapsed_s=time.monotonic() - started,
+                log=log,
             )
-            await self._send_final(request_id, final)
-
         except asyncio.CancelledError:
             log.info("İstek iptal edildi")
             await self._emit_quiet(emit, "system", "İstek iptal edildi", "Kullanıcı isteği durdurdu.")
@@ -527,6 +626,64 @@ class Orchestrator:
                 self._task_request_id = None
             # `_announced_cancels` keeps the id: a repeated `cancel` frame for the
             # same request must not emit a second "İstek iptal edildi." frame.
+
+    async def _finish_partial(
+        self,
+        request_id: str,
+        *,
+        goal: str,
+        route: str,
+        summary: str,
+        evidence: list[str],
+        snapshot: dict[str, Any] | None,
+        history: list[HistoryEntry],
+        emit: EmitFn,
+        deadline: float,
+        elapsed_s: float,
+        log: logging.LoggerAdapter,  # type: ignore[type-arg]
+    ) -> None:
+        """Budget ran out: answer with what was gathered — never as a cancel."""
+
+        budget = float(self._settings.request_budget_s)
+        reason = f"İstek için ayrılan süre doldu ({budget:.0f} sn); eldeki sonuçla yanıtlanıyor."
+        log.info("Bütçe doldu (%.1f sn), kısmi yanıt hazırlanıyor", elapsed_s)
+        await self._emit_quiet(emit, "system", "Süre doldu, kısmi yanıt", reason)
+
+        partial_summary = f"{PARTIAL_PREFIX} {summary}".strip() if summary else PARTIAL_PREFIX
+        final: FinalAnswer | None = None
+        responder = self.responder
+        # The Responder normally has its reserved slice; if even that is gone it
+        # still gets a short grace period rather than no answer at all.
+        responder_deadline = max(deadline, time.monotonic() + 10.0)
+        if responder is not None:
+            try:
+                final = await _within(
+                    responder.respond(
+                        goal=goal,
+                        route=route,
+                        result_summary=partial_summary,
+                        evidence=evidence,
+                        snapshot=snapshot,
+                        history=history,
+                        emit=emit,
+                    ),
+                    responder_deadline,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # BudgetExceeded included
+                log.info("Kısmi yanıt için Responder başarısız: %s", _error_text(exc))
+                final = None
+
+        if final is None or not (final.answer or "").strip():
+            body = summary.strip() or _history_digest(history) or "Henüz kullanılabilir bir sonuç toplanamadı."
+            final = FinalAnswer(
+                answer=f"{PARTIAL_PREFIX}\n\n{body}",
+                spoken="Süre doldu; eldeki sonucu yazdım.",
+            )
+        elif not final.answer.lstrip().startswith(PARTIAL_PREFIX):
+            final = final.model_copy(update={"answer": f"{PARTIAL_PREFIX}\n\n{final.answer}"})
+        await self._send_final(request_id, final)
 
     async def _run_tool_loop(
         self,
@@ -549,6 +706,8 @@ class Orchestrator:
         tools = registry.list_for(route)
         goal = plan.goal or text
         tool_calls = calls_used
+        if snapshot is not None:
+            self._latest_snapshot = snapshot
         summary = ""
         evidence: list[str] = []
 
@@ -602,6 +761,27 @@ class Orchestrator:
                         error=error,
                         why=action.why,
                     )
+                )
+                continue
+
+            # Schema check before any gate or handler: a malformed call is sent
+            # back to the executor as a Turkish error it can correct.
+            invalid = registry.validate_args(tool, action.args)
+            if invalid:
+                tool_calls += 1
+                log.info("Geçersiz argüman (%s): %s", tool.name, invalid)
+                history.append(
+                    HistoryEntry(
+                        tool=tool.name, args=action.args, ok=False, error=invalid, why=action.why
+                    )
+                )
+                await self._emit_quiet(
+                    emit,
+                    "system",
+                    "Araç argümanları geçersiz, çalıştırılmadı",
+                    invalid,
+                    tool_name=tool.name,
+                    tool_args=action.args,
                 )
                 continue
 
@@ -680,6 +860,7 @@ class Orchestrator:
                 data = result.get("data")
                 if isinstance(data, dict) and "elements" in data:
                     snapshot = data
+                    self._latest_snapshot = data
                 history.append(
                     HistoryEntry(
                         tool=tool.name, args=action.args, ok=True, data=data, why=action.why
@@ -855,6 +1036,23 @@ class Orchestrator:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.info("Trace yayılamadı: %s", exc)
+
+
+def _history_digest(history: list[HistoryEntry], limit: int = 5) -> str:
+    """Short markdown list of the last successful tool steps (partial answers)."""
+
+    lines: list[str] = []
+    for entry in history:
+        if not entry.ok or entry.tool in {"judge_feedback", "kullanici_cevabi"}:
+            continue
+        data = entry.data
+        if isinstance(data, dict):
+            text = str(data.get("text") or data.get("title") or "").strip()
+        else:
+            text = str(data or "").strip()
+        if text:
+            lines.append(f"- `{entry.tool}`: {text[:300]}")
+    return "\n".join(lines[-limit:])
 
 
 def _frame_id(frame: dict[str, Any]) -> str | None:

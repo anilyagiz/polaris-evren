@@ -102,3 +102,9 @@ def emitted():
 
     emit.steps = steps
     return emit
+
+
+@pytest.fixture(autouse=True)
+def _no_llm_fallback(monkeypatch):
+    """The developer's backend/.env may set LLM_FALLBACK_MODEL; keep unit tests hermetic."""
+    monkeypatch.delenv("LLM_FALLBACK_MODEL", raising=False)

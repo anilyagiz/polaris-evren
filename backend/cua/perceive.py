@@ -1,6 +1,9 @@
 """Screen perception: screenshot PNG -> numbered element list (Snapshot) the text-only LLM can read.
 
-DESKTOP_PARSER=ocr (default): rapidocr-onnxruntime text boxes, merged per line.
+DESKTOP_PARSER=ocr (default): RapidOCR text boxes, split into words/menu items, merged per line.
+  - `rapidocr` 3.x (maintained, Python 3.13 OK, models bundled in the wheel; verified 3.10.0)
+  - legacy `rapidocr_onnxruntime` (Python <= 3.12) is used only if `rapidocr` is missing.
+    Note: on 3.13 pip silently resolves rapidocr-onnxruntime to an ancient 1.2.3 that misses text.
 DESKTOP_PARSER=omniparser: not implemented yet, falls back to OCR.
 """
 from __future__ import annotations
@@ -21,8 +24,8 @@ MAX_NAME_CHARS = 80
 EXCERPT_CHARS = 1500
 MIN_SCORE = 0.5
 LINE_OVERLAP = 0.5   # vertical overlap (fraction of the smaller box) to count as the same line
-WORD_GAP = 0.6       # max horizontal gap, in box heights, to merge boxes into one element
-SPLIT_GAP = 0.8      # a gap this wide (in box heights) between characters splits one OCR box (menu items)
+WORD_GAP = 0.45      # max horizontal gap, in box heights, to merge boxes into one element (< SPLIT_GAP)
+SPLIT_GAP = 0.5      # a gap this wide (in box heights) between words/chars splits one OCR line (menu items)
 CHAR_PAD = 2         # px added around boxes built from character boxes
 
 _engine: Any = None
@@ -31,10 +34,16 @@ _engine: Any = None
 def _get_engine() -> Any:
     global _engine
     if _engine is None:
-        from rapidocr_onnxruntime import RapidOCR
-
         started = time.perf_counter()
-        _engine = RapidOCR()
+        try:
+            from rapidocr import RapidOCR
+
+            # screens are upright: skip the angle classifier; keep RapidOCR's own logging quiet
+            _engine = RapidOCR(params={"Global.log_level": "warning", "Global.use_cls": False})
+        except ImportError:
+            from rapidocr_onnxruntime import RapidOCR  # legacy package (Python <= 3.12)
+
+            _engine = RapidOCR()
         logger.info("RapidOCR loaded in %.1fs", time.perf_counter() - started)
     return _engine
 
@@ -45,7 +54,53 @@ def _ocr_boxes(png: bytes) -> list[dict]:
     from PIL import Image
 
     image = np.array(Image.open(io.BytesIO(png)).convert("RGB"))
-    result, _ = _get_engine()(image, return_word_box=True)
+    out = _get_engine()(image, return_word_box=True)
+    if hasattr(out, "txts"):  # rapidocr 3.x -> RapidOCROutput
+        return _boxes_from_output(out)
+    result = out[0] if isinstance(out, tuple) else out
+    return _boxes_from_legacy(result)
+
+
+def _boxes_from_output(out: Any) -> list[dict]:
+    """rapidocr 3.x: txts/scores/boxes per line; word_results[i] = ((word, score, 4 points), ...)."""
+    boxes: list[dict] = []
+    if out.txts is None or out.boxes is None:
+        return boxes
+    words_per_line = out.word_results if out.word_results else [()] * len(out.txts)
+    for points, text, score, words in zip(out.boxes, out.txts, out.scores, words_per_line):
+        text, score = str(text).strip(), float(score)
+        if not text or score < MIN_SCORE:
+            continue
+        words = [w for w in (words or ()) if len(w) >= 3 and str(w[0]).strip()]
+        if words:
+            boxes.extend(_split_words(words, score))
+        else:
+            boxes.append({"text": text, "bbox": _points_to_bbox(points), "score": score})
+    return boxes
+
+
+def _split_words(words: list, score: float) -> list[dict]:
+    """Rejoin words of one OCR line, but split where the gap is wide ("Search    Help" menus)."""
+    out: list[dict] = []
+    current: dict | None = None
+    for word, _wscore, points in words:
+        bbox = _points_to_bbox(points)
+        if current is not None:
+            cx, cy, cw, ch = current["bbox"]
+            if bbox[0] - (cx + cw) <= SPLIT_GAP * max(ch, bbox[3]):
+                x0, y0 = min(cx, bbox[0]), min(cy, bbox[1])
+                x1, y1 = max(cx + cw, bbox[0] + bbox[2]), max(cy + ch, bbox[1] + bbox[3])
+                current = {"text": f"{current['text']} {word}", "bbox": [x0, y0, x1 - x0, y1 - y0], "score": score}
+                continue
+            out.append(current)
+        current = {"text": str(word).strip(), "bbox": bbox, "score": score}
+    if current is not None:
+        out.append(current)
+    return out
+
+
+def _boxes_from_legacy(result: Any) -> list[dict]:
+    """rapidocr_onnxruntime: [[points, text, score, (char_boxes, chars, ...)], ...]."""
     boxes: list[dict] = []
     for item in result or []:
         points, text, score = item[0], str(item[1]).strip(), float(item[2])
@@ -189,8 +244,15 @@ async def perceive(png: bytes, request_id: str, n: int, boxes: list[dict] | None
 
 
 def warm_up() -> None:
-    """Load the OCR model ahead of the first snapshot (call via asyncio.to_thread at startup)."""
-    _get_engine()
+    """Load the OCR model and run one tiny inference (the first run is ~2x slower). Call via
+    asyncio.to_thread at startup."""
+    import numpy as np
+
+    engine = _get_engine()
+    try:
+        engine(np.full((64, 256, 3), 255, dtype=np.uint8))
+    except Exception:
+        logger.debug("OCR warm-up inference failed", exc_info=True)
 
 
 def format_for_llm(snapshot: dict) -> str:

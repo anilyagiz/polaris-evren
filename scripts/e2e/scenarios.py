@@ -446,12 +446,15 @@ async def extension_disconnect(ctx: Ctx) -> None:
 # ==========================================================================
 # 10. limits and judge loops
 # ==========================================================================
-@scenario("tool_call_cap", doc="runaway executor stops at 8 tool calls with a system trace, still answers")
+@scenario("tool_call_cap", doc="runaway executor stops at max_tool_calls with a system trace, still answers")
 async def tool_call_cap(ctx: Ctx) -> None:
+    from backend.config import get_settings
+
+    cap = get_settings().max_tool_calls
     ext = await ctx.ext()
     run = await ext.ask("Sonsuz kaydır", timeout=60)
     ctx.expect_final(run)
-    ctx.check(len(run.tool_calls) == 8, f"expected exactly 8 tool_calls (max_tool_calls), got {len(run.tool_calls)}")
+    ctx.check(len(run.tool_calls) == cap, f"expected exactly {cap} tool_calls (max_tool_calls), got {len(run.tool_calls)}")
     ctx.check(any(s["agent"] == "system" for s in run.traces), "no system trace explaining the limit")
 
 

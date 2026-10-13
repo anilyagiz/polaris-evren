@@ -166,7 +166,15 @@ function isUsableTab(tab: chrome.tabs.Tab): boolean {
 
 async function resolveTab(tabId?: number): Promise<chrome.tabs.Tab> {
   if (tabId !== undefined) {
-    return chrome.tabs.get(tabId);
+    const requested = await chrome.tabs.get(tabId);
+    // On the tab fallback (Brave without sidePanel, or the panel opened as a
+    // tab) the panel's own `{active, currentWindow}` query returns the PANEL
+    // tab and passes its id here. Our own page can never be the automation
+    // target, so resolve the user's real page instead of failing every call
+    // with "Bu sayfada asistan çalışamıyor" (found by scripts/browser_e2e).
+    if (!isOwnPage(requested.url)) {
+      return requested;
+    }
   }
   // The caller (side panel, or the panel/dev tester running as a normal tab on
   // the Brave fallback path) is itself a tab in the focused window, so a plain

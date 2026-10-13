@@ -1,0 +1,4 @@
+# Polaris sistem tepsisi (tray/). Kurulum: .venv\Scripts\python -m pip install -r backend\requirements-tray.txt
+# Polaris.exe derlemek icin ayrica: pyinstaller (tray\build.ps1 kendisi kurar)
+pystray>=0.19.5
+Pillow>=10.0

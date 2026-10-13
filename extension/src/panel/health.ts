@@ -1,0 +1,82 @@
+import { normalizeBackend } from "./protocol";
+
+/** `/health` payload. Only `ok` is guaranteed; everything else is optional. */
+export interface Health {
+  ok: boolean;
+  llm_model: string | null;
+  llm_configured: boolean | null;
+  cua_enabled: boolean | null;
+  stt_ready: boolean | null;
+  brave_configured: boolean | null;
+  version: string | null;
+}
+export type HealthState =
+  | { kind: "checking" }
+  | { kind: "unreachable"; message: string }
+  | { kind: "ok"; health: Health; checkedAt: number };
+
+/** One-click launcher in the repo root (also used by the tray app). */
+export const RUN_BACKEND_COMMAND = "start-polaris.cmd";
+/** Developer alternative with live reload. */
+export const RUN_BACKEND_SCRIPT = ".\\scripts\\run-backend.ps1";
+
+const bool = (value: unknown) => (typeof value === "boolean" ? value : null);
+const text = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+export function parseHealth(value: unknown): Health | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.ok !== true) return null;
+  return {
+    ok: true,
+    llm_model: text(raw.llm_model),
+    llm_configured: bool(raw.llm_configured),
+    cua_enabled: bool(raw.cua_enabled),
+    stt_ready: bool(raw.stt_ready),
+    brave_configured: bool(raw.brave_configured),
+    version: text(raw.version),
+  };
+}
+
+export async function checkHealth(
+  backend: string,
+  timeoutMs = 4000,
+): Promise<HealthState> {
+  let url: string;
+  try {
+    url = `${normalizeBackend(backend)}/health`;
+  } catch {
+    return { kind: "unreachable", message: "Backend adresi geçersiz." };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok)
+      return {
+        kind: "unreachable",
+        message: `Sunucu hata döndürdü (HTTP ${response.status}).`,
+      };
+    const health = parseHealth(await response.json());
+    if (!health)
+      return {
+        kind: "unreachable",
+        message: "Bu adresteki sunucu Polaris gibi görünmüyor.",
+      };
+    return { kind: "ok", health, checkedAt: Date.now() };
+  } catch (cause) {
+    return {
+      kind: "unreachable",
+      message:
+        cause instanceof DOMException && cause.name === "AbortError"
+          ? "Sunucu zamanında yanıt vermedi."
+          : "Sunucuya ulaşılamadı.",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
