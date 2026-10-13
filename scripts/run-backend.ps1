@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-  Polaris backend'ini baslatir (127.0.0.1, port PORT ortam degiskeni / backend\.env PORT / 8000).
+  Polaris backend'ini baslatir (127.0.0.1, port PORT ortam degiskeni / backend\.env PORT / 8765).
 .PARAMETER NoReload
   --reload kapali (demo sirasinda onerilir: reload whisper modelini yeniden yukler).
   backend\__main__.py varsa bu modda `python -m backend` kullanilir.
 .PARAMETER Port
-  Dinlenecek port (varsayilan: $env:PORT, sonra backend\.env PORT, sonra 8000).
+  Dinlenecek port (varsayilan: $env:PORT, sonra backend\.env PORT, sonra 8765).
 #>
 param(
   [switch]$NoReload,
@@ -33,7 +33,7 @@ if ($Port -le 0) {
   if ($env:PORT) { $Port = [int]$env:PORT }
   else {
     $fromFile = Get-EnvFileValue "PORT"
-    $Port = if ($fromFile -match '^\d+$') { [int]$fromFile } else { 8000 }
+    $Port = if ($fromFile -match '^\d+$') { [int]$fromFile } else { 8765 }
   }
 }
 $BindHost = if ($env:HOST) { $env:HOST } else { "127.0.0.1" }

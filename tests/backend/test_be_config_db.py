@@ -10,7 +10,7 @@ from backend import config, db
 def test_defaults(settings_env):
     s = settings_env()
     assert s.llm_model == "deepseek-chat" and s.timezone == "Europe/Istanbul"
-    assert s.port == 8000 and s.tool_timeout_s == 20.0 and s.confirm_timeout_s == 60.0
+    assert s.port == 8765 and s.tool_timeout_s == 20.0 and s.confirm_timeout_s == 60.0
     assert s.max_tool_calls == 12 and s.request_budget_s == 240.0 and s.max_revisions == 2
     assert s.cua_enabled is False and s.llm_configured is False
     assert s.desktop_parser == "ocr"
@@ -31,7 +31,7 @@ def test_bool_parsing(settings_env, raw, expected):
 
 def test_invalid_numbers_fall_back(settings_env):
     s = settings_env(PORT="abc", TOOL_TIMEOUT_S="x")
-    assert s.port == 8000 and s.tool_timeout_s == 20.0
+    assert s.port == 8765 and s.tool_timeout_s == 20.0
 
 
 def test_blank_env_uses_default(settings_env):

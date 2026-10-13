@@ -16,7 +16,7 @@ it("talks to the local backend on a fresh install", async () => {
   localStorage.clear();
   const settings = await loadSettings();
   expect(settings).toEqual(defaultSettings);
-  expect(settings.backend).toBe("http://localhost:8000");
+  expect(settings.backend).toBe("http://localhost:8765");
   expect("mock" in settings).toBe(false);
 });
 it("enables voice responses on a fresh install", async () => {
@@ -46,7 +46,7 @@ it("falls back to the default backend when the stored URL is invalid", async () 
     "polaris-panel-settings",
     JSON.stringify({ backend: "ftp://x", speak: true }),
   );
-  expect((await loadSettings()).backend).toBe("http://localhost:8000");
+  expect((await loadSettings()).backend).toBe("http://localhost:8765");
 });
 it("validates backend URLs (http/https only)", () => {
   expect(backendError("http://localhost:8000")).toBeNull();

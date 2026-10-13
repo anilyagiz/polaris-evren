@@ -8,12 +8,12 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
 ## 0. Demo öncesi kontrol listesi (5 dk önce)
 
 - [ ] `start-polaris.cmd` çift tıklandı → saatin yanında Polaris yıldızı (tepsi) ya da "Polaris Backend" penceresi açık
-      (`python scripts\doctor.py` hepsini özetler) → `http://localhost:8000/health` → `{"ok": true}`
+      (`python scripts\doctor.py` hepsini özetler) → `http://localhost:8765/health` → `{"ok": true}`
       — Elle başlatıyorsan `.\scripts\run-backend.ps1 -NoReload`: reload her kod değişiminde whisper modelini yeniden yükler.
-- [ ] Port 8000 boş (doluysa `backend\.env` → `PORT=8010` ve panel Ayarlar → `http://localhost:8010`)
+- [ ] Port 8765 boş (doluysa `backend\.env` → `PORT=8010` ve panel Ayarlar → `http://localhost:8010`)
 - [ ] Whisper modeli indirilmiş (`scripts\setup.ps1 -DownloadModels`; doctor "Whisper modeli ... onbellekte" demeli)
 - [ ] `backend/.env` dolu: `DEEPSEEK_API_KEY` (evren_llm_...), `BRAVE_API_KEY`, `LLM_MODEL`, `STT_CPU_THREADS=8`
-- [ ] Extension Brave'e yüklendi, panelde backend adresi `http://localhost:8000`
+- [ ] Extension Brave'e yüklendi, panelde backend adresi `http://localhost:8765`
 - [ ] Mikrofon izni verildi (`brave://settings/content/microphone`)
 - [ ] Whisper modeli **bir kez önceden** `POST /stt` ile ısıtıldı (ilk istekte 4,8 sn; sonrası 2,1 sn)
 - [ ] `python scripts\test_voice.py` ve `python scripts\test_tools.py` PASS

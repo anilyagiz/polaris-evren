@@ -407,7 +407,7 @@ describe("First run and health UX", () => {
       await Promise.resolve();
     });
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/health",
+      "http://localhost:8765/health",
       expect.anything(),
     );
     expect(screen.getByText("Polaris sunucusu çalışmıyor")).toBeTruthy();

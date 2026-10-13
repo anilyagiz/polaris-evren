@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HOST = "127.0.0.1"
-PORT = 8000  # main() icinde PORT ortam degiskeni / backend/.env PORT ile guncellenir
+PORT = 8765  # main() icinde PORT ortam degiskeni / backend/.env PORT ile guncellenir
 
 OK, WARN, FAIL = "[ OK ]", "[UYARI]", "[HATA]"
 results: list[tuple[str, str, str]] = []

@@ -123,7 +123,7 @@ def get_settings() -> Settings:
         desktop_parser=_env("DESKTOP_PARSER", "ocr").lower(),
         db_path=db_path,
         host=_env("HOST", "127.0.0.1"),
-        port=_env_int("PORT", 8000),
+        port=_env_int("PORT", 8765),
         llm_timeout_s=_env_float("LLM_TIMEOUT_S", 30.0),
         llm_temperature_chat=_env_float("LLM_TEMPERATURE_CHAT", 0.6),
         tool_timeout_s=_env_float("TOOL_TIMEOUT_S", 20.0),

@@ -4,7 +4,7 @@ export interface Settings {
   backend: string;
   speak: boolean;
 }
-export const DEFAULT_BACKEND = "http://localhost:8000";
+export const DEFAULT_BACKEND = "http://localhost:8765";
 export const defaultSettings: Settings = {
   backend: DEFAULT_BACKEND,
   speak: true,
@@ -51,7 +51,7 @@ export function backendError(value: string): string | null {
     normalizeBackend(value);
     return null;
   } catch {
-    return "Geçerli bir http:// veya https:// adresi yaz (örn. http://localhost:8000).";
+    return "Geçerli bir http:// veya https:// adresi yaz (örn. http://localhost:8765).";
   }
 }
 /** The manifest CSP only allows localhost / 127.0.0.1 connections. */

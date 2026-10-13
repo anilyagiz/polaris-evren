@@ -1,6 +1,6 @@
 """`python -m backend` — start the Polaris backend with a Turkish banner.
 
-Owner: K3 (P3).  Uses HOST/PORT from backend/.env (defaults 127.0.0.1:8000);
+Owner: K3 (P3).  Uses HOST/PORT from backend/.env (defaults 127.0.0.1:8765);
 `--host` / `--port` override them.  Secret values are never printed.
 """
 

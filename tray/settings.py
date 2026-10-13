@@ -1,7 +1,7 @@
 """HOST/PORT for the backend, read the same way backend/config.py does.
 
 Process environment wins over ``backend/.env`` (python-dotenv's default), and
-the default port is 8000.  Only these two keys are read; secrets are ignored.
+the default port is 8765.  Only these two keys are read; secrets are ignored.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Mapping
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
+DEFAULT_PORT = 8765
 
 
 def parse_env_text(text: str) -> dict[str, str]:
@@ -95,5 +95,5 @@ def ensure_env_file(env_file: Path, example: Path) -> bool:
     if example.exists():
         shutil.copyfile(example, env_file)
     else:
-        env_file.write_text("DEEPSEEK_API_KEY=\nLLM_MODEL=deepseek-chat\nPORT=8000\n", encoding="utf-8")
+        env_file.write_text("DEEPSEEK_API_KEY=\nLLM_MODEL=deepseek-chat\nPORT=8765\n", encoding="utf-8")
     return True

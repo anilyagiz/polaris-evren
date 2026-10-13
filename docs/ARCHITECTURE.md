@@ -22,7 +22,7 @@ Donmuş sözleşme: [`PROTOCOL.md`](PROTOCOL.md). Bu belge onu özetler ve uygul
 
 ## 2. WebSocket akışı
 
-`ws://localhost:8000/ws`; her frame JSON ve `type` içerir.
+`ws://localhost:8765/ws`; her frame JSON ve `type` içerir.
 
 ```
 Panel                         Backend                               Extension (browser.*)

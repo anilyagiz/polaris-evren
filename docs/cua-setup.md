@@ -182,7 +182,7 @@ Sahte ekranda tıklanabilir öğeler: Dosya, Düzenle, Görünüm, Kaydet (durum
 2. `docker images ghcr.io/trycua/linux` imajı gösteriyor.
 3. `.venv\Scripts\python.exe scripts\cua_smoke.py` -> `OK` ve `backend/data/shots/` altında png'ler.
 4. Backend açılışında log: "Kayıtlı araçlar" içinde `desktop.click, desktop.key, desktop.scroll, desktop.snapshot, desktop.type`.
-5. Tarayıcıdan `http://localhost:8000/shots/<dosya>.png` görüntü döner; geçersiz ad 404 verir.
+5. Tarayıcıdan `http://localhost:8765/shots/<dosya>.png` görüntü döner; geçersiz ad 404 verir.
 
 ## 10. Yedek plan
 

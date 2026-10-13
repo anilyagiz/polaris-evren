@@ -38,6 +38,6 @@ Brave'e yukleme:
   3) 'Paketlenmemis uzantiyi yukle' -> su klasoru secin: $dist
   4) Polaris simgesine tiklayin / yan paneli acin
   5) Ilk bas-konus'ta mikrofon iznini verin (brave://settings/content/microphone)
-  6) Panel Ayarlar -> Backend adresi: http://localhost:8000
+  6) Panel Ayarlar -> Backend adresi: http://localhost:8765
 Kod degisikliginden sonra bu betigi tekrar calistirin, brave://extensions'ta uzantiyi yenileyin.
 "@

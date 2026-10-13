@@ -338,7 +338,7 @@ export function SettingsModal({
                 setDraft({ ...draft, backend: event.target.value });
                 setTest({ kind: "idle" });
               }}
-              placeholder="http://localhost:8000"
+              placeholder="http://localhost:8765"
             />
             <button
               type="button"

@@ -75,7 +75,7 @@ CUA_ENABLED=false
 DESKTOP_PARSER=ocr    # ocr | omniparser
 ```
 
-Backend portu `8000`. Extension backend adresini ayarlardan okur, varsayılan `http://localhost:8000`.
+Backend portu `8765`. Extension backend adresini ayarlardan okur, varsayılan `http://localhost:8765`.
 
 ## 5. HTTP uç noktaları
 
@@ -91,7 +91,7 @@ CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verili
 
 ## 6. WebSocket protokolü (DONMUŞ)
 
-`ws://localhost:8000/ws`. Her frame bir JSON nesnesi ve mutlaka `type` alanı içerir. Bağlantı başına aynı anda tek istek işlenir.
+`ws://localhost:8765/ws`. Her frame bir JSON nesnesi ve mutlaka `type` alanı içerir. Bağlantı başına aynı anda tek istek işlenir.
 
 ### İstemci → Sunucu
 ```jsonc

@@ -17,7 +17,7 @@ Kurulum, Brave'e yükleme ve sorun giderme için: [`extension/README.md`](../../
 
 ## Davranış
 
-- Panel her zaman gerçek sunucuya bağlanır (demo modu yok). Varsayılan adres `http://localhost:8000`.
+- Panel her zaman gerçek sunucuya bağlanır (demo modu yok). Varsayılan adres `http://localhost:8765`.
 - Açılışta, her yeniden bağlanmada ve sunucu kapalıyken 5 sn'de bir `/health` kontrol edilir.
 - Testler sahte sunucuyu `<App createTransport={...} />` ile enjekte eder.
 - Kısayollar: Enter gönder, Shift+Enter yeni satır, Esc görevi iptal et, Space (odak metin kutusunda değilken) bas-konuş.

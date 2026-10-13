@@ -12,7 +12,7 @@ küçük bir uygulama. Kod: `tray/`. Testler: `tests/tray/`.
   Konsol penceresi açılmaz (`CREATE_NO_WINDOW`). Çıktı:
   `backend\data\logs\tray-backend.log` (5 MB'ı geçince `.1` olarak döner).
 - `HOST`/`PORT` değerlerini `backend\.env` dosyasından okur (ortam değişkeni
-  öncelikli, varsayılan `127.0.0.1:8000`).
+  öncelikli, varsayılan `127.0.0.1:8765`).
 - Her 5 saniyede bir `GET /health` yapar ve simgeyi günceller:
 
   | Simge | İpucu metni | Anlamı |
@@ -103,7 +103,7 @@ Yönetici yetkisi gerekmez (yalnızca geçerli kullanıcı).
 
 | Belirti | Çözüm |
 |---|---|
-| Simge kırmızı, "port 8000 dolu" uyarısı | Başka bir program 8000'i kullanıyor. **Ayarlar dosyasını aç** → `PORT=8010` ekle → kaydet → **Sunucuyu yeniden başlat**. Brave paneli → Ayarlar → Backend adresi: `http://localhost:8010` |
+| Simge kırmızı, "port 8765 dolu" uyarısı | Başka bir program 8765'i kullanıyor. **Ayarlar dosyasını aç** → `PORT=8010` ekle → kaydet → **Sunucuyu yeniden başlat**. Brave paneli → Ayarlar → Backend adresi: `http://localhost:8010` |
 | Simge kırmızı, "LLM anahtarı eksik" | `backend\.env` içine `DEEPSEEK_API_KEY=...` yaz, kaydet, yeniden başlat |
 | Simge kırmızı, "sunucu kapandı" | **Kayıtları aç** → `tray-backend.log` sonundaki hatayı oku (çoğunlukla eksik paket: `scripts\setup.ps1`'i tekrar çalıştır) |
 | "Python ortamı bulunamadı" / sunucu başlatılamadı | `.venv` eksik ya da exe yanlış klasörde. Exe, `backend\` ve `.venv\` ile aynı klasörde olmalı |

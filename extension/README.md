@@ -3,7 +3,7 @@
 Polaris'in Brave yan panelinde çalışan arayüzü: sohbet, bas-konuş, sesli yanıt,
 onay penceresi ve her adımın gerekçesini gösteren **"Neden?"** zaman çizelgesi.
 Eklenti tek başına çalışmaz; her zaman yerel **Polaris sunucusuna** (FastAPI,
-varsayılan `http://localhost:8000`) bağlanır.
+varsayılan `http://localhost:8765`) bağlanır.
 
 ## 1. Derleme
 
@@ -77,7 +77,7 @@ Cevapların altında **Kopyala** ve **Sesli oku**; başlıkta **Sohbeti temizle*
 
 | Belirti | Çözüm |
 |---|---|
-| "Polaris sunucusu çalışmıyor" | Sunucu açık mı? Tarayıcıda <http://127.0.0.1:8000/health> → `{"ok": true, ...}` dönmeli. Ayarlar'daki adresi kontrol et |
+| "Polaris sunucusu çalışmıyor" | Sunucu açık mı? Tarayıcıda <http://127.0.0.1:8765/health> → `{"ok": true, ...}` dönmeli. Ayarlar'daki adresi kontrol et |
 | Rozet sürekli "Bağlanıyor/Kopuk" ama `/health` açılıyor | Ayarlar'daki adres ile sunucu adresi aynı mı (`localhost` / `127.0.0.1`, port)? Uzantıyı yenile |
 | "Yapay zekâ anahtarı kabul edilmedi" / "Model ayarı hatalı" | `backend\.env`: `DEEPSEEK_API_KEY`, `LLM_MODEL`, `DEEPSEEK_BASE_URL`; değiştirince sunucuyu yeniden başlat |
 | "Yapay zekâ servisi şu an yoğun" (429) | Birkaç saniye bekleyip tekrar dene |

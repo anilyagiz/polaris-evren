@@ -195,7 +195,7 @@ def test_config_warnings_never_leak_secrets(settings_env, monkeypatch):
     assert config.missing_keys(s) == ["LLM_MODEL", "BRAVE_API_KEY"]
     s2 = settings_env(DEEPSEEK_API_KEY="", LLM_MODEL="deepseek-chat", BRAVE_API_KEY="b-secret")
     assert config.missing_keys(s2) == ["DEEPSEEK_API_KEY"]
-    assert s2.host == "127.0.0.1" and s2.port == 8000
+    assert s2.host == "127.0.0.1" and s2.port == 8765
 
 
 def test_banner(settings_env, monkeypatch):

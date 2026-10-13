@@ -13,7 +13,7 @@ Polaris, **Brave tarayıcının yan panelinde** çalışan genel amaçlı bir ki
 ## Mimari özeti
 
 ```
- Brave                                          Python (127.0.0.1:8000)
+ Brave                                          Python (127.0.0.1:8765)
 +---------------------------+  WS /ws (JSON)   +-----------------------------------------+
 | Yan panel (React/MV3)     |<---------------->| FastAPI main.py                         |
 |  - sohbet, Neden? zaman   |  POST /stt (webm)|   Orchestrator                          |
@@ -62,10 +62,10 @@ Mimari ayrıntılar: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Donmuş pro
       (sürüm zip'inde: `extension-dist`)
    4. Polaris simgesine tıkla → yan panel açılır
    5. İlk **Bas-konuş**'ta mikrofon iznini ver
-   6. Panel **Ayarlar → Backend adresi**: `http://localhost:8000`
+   6. Panel **Ayarlar → Backend adresi**: `http://localhost:8765`
 3. Panelde yaz ya da bas-konuş: *"Bu sayfayı özetle"*.
 
-Doğrulama: <http://127.0.0.1:8000/health> → `{"ok": true, ...}` · Tam kontrol listesi:
+Doğrulama: <http://127.0.0.1:8765/health> → `{"ok": true, ...}` · Tam kontrol listesi:
 `.venv\Scripts\python scripts\doctor.py`
 
 ### Elle kurulum (geliştirici)
@@ -113,13 +113,16 @@ ekleme (`.env` .gitignore'dadır). `.env` değişince backend'i yeniden başlat.
 |---|---|---|
 | `DEEPSEEK_API_KEY` | — | **Zorunlu.** LLM anahtarı |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI uyumlu başka bir ağ geçidi için değiştir |
-| `LLM_MODEL` | `deepseek-chat` | Model adı |
-| `BRAVE_API_KEY` | boş | `web.search` için ([brave.com/search/api](https://brave.com/search/api/)); boşsa araç hata döner |
+| `LLM_MODEL` | `deepseek-chat` | Model adı. EVREN geçidinde önerilen: `gemma-4-31b` (hızlı) |
+| `LLM_FALLBACK_MODEL` | boş | Birincil model hata verirse (zaman aşımı, 5xx, model yok) düşülecek model, örn. `deepseek-v4.1-flash` |
+| `LLM_THINKING` | açık | `off`: birincil modelin gizli "düşünme" adımını kapatır (Gemma'da adım ~1 sn, ~5 kat hızlı) |
+| `BRAVE_API_KEY` | boş | `web.search` için ([brave.com/search/api](https://brave.com/search/api/)); boşsa anahtarsız DuckDuckGo yedeği kullanılır |
+| `WEB_SEARCH_FALLBACK` | `duckduckgo` | `off` yapılırsa anahtarsız yedek kapanır |
 | `STT_MODEL` | `small` | `small` (~460 MB) \| `base` (~140 MB, ~2× hızlı, Türkçede daha zayıf) |
 | `STT_CPU_THREADS` | mantıksal çekirdek/2 | Çekirdek sayısının tamamını verme (yavaşlatır) |
 | `TTS_VOICE` | `tr-TR-EmelNeural` | edge-tts sesi |
 | `TIMEZONE` | `Europe/Istanbul` | Hatırlatıcılar için |
-| `HOST` / `PORT` | `127.0.0.1` / `8000` | Backend adresi. `PORT` ortam değişkeni `.env`'i ezer |
+| `HOST` / `PORT` | `127.0.0.1` / `8765` | Backend adresi. `PORT` ortam değişkeni `.env`'i ezer |
 | `CUA_ENABLED` | `false` | Masaüstü araçlarını açar (Docker gerekir) |
 | `DESKTOP_PARSER` | `ocr` | `ocr` \| `omniparser` |
 | `ASSISTANT_DB` | `backend/data/assistant.db` | Test için ayrı veritabanı |
@@ -149,13 +152,13 @@ Tam akış, beklenen zaman çizelgesi adımları ve ters giderse planları: [`de
 | Belirti | Çözüm |
 |---|---|
 | `pnpm install` **EPERM** (esbuild) | Proje pnpm kullanmaz. `extension\node_modules`'u sil, `cd extension; npm install --no-package-lock` (ya da `build-extension.ps1 -Install`) |
-| **Port 8000 dolu** | start-polaris hangi PID'in kullandığını yazar. O programı kapat (Docker/WSL konteyneri de olabilir: `wslrelay`) **ya da** `backend\.env` içine `PORT=8010` yaz (veya `set PORT=8010` sonra `start-polaris.cmd`) ve panel **Ayarlar → Backend adresi** `http://localhost:8010` yap |
+| **Port 8765 dolu** | start-polaris hangi PID'in kullandığını yazar. O programı kapat (Docker/WSL konteyneri de olabilir: `wslrelay`) **ya da** `backend\.env` içine `PORT=8010` yaz (veya `set PORT=8010` sonra `start-polaris.cmd`) ve panel **Ayarlar → Backend adresi** `http://localhost:8010` yap |
 | Panel "Bağlantı yok" | Backend çalışıyor mu? `/health` aç. Ayarlardaki adres ve port doğru mu? |
 | **Mikrofon izni** yok / reddedildi | `brave://settings/content/microphone` → uzantıya izin ver; ya da panelde yeniden **Bas-konuş** → izin sayfası. Mikrofon çalışmazsa metin kutusu her zaman kullanılabilir |
 | İlk sesli istek ~60 sn sürüyor | İlk `/stt` whisper `small` modelini (**~460 MB**) indirir. Önceden: `scripts\setup.ps1 -DownloadModels`. Hız için `STT_MODEL=base`, `STT_CPU_THREADS=8`; demoda reload kapalı (`-NoReload`) |
 | `/tts` **403/503** (edge-tts) | edge-tts resmî olmayan istemcidir; kod bir kez yedek uç noktayla dener, yine olmazsa panel **tarayıcının kendi sesine** düşer. Cevap metni her zaman görünür. Kalıcıysa `pip install -U edge-tts` |
 | Cevap gelmiyor / LLM hatası | `DEEPSEEK_API_KEY`, `LLM_MODEL`, `DEEPSEEK_BASE_URL` doğru mu? `.env` sonrası backend yeniden başlatıldı mı? (`/health` → `llm_configured`) |
-| `web.search` hata | `BRAVE_API_KEY` boş veya 429 (aylık limit). Anahtarı doldur, yeniden başlat |
+| `web.search` hata | Anahtar yoksa DuckDuckGo yedeği kullanılır; o da hata verirse internet bağlantısını kontrol et. `BRAVE_API_KEY` ile 429 = aylık limit |
 | `extension/dist` yok / derleme hatası | `.\scripts\build-extension.ps1 -Install`; Node 18+ kurulu mu? |
 | Uzantı sayfayı okuyamıyor | `brave://` ve mağaza sayfalarında content script çalışmaz; normal bir `https://` sekmesi aç, sayfayı yenile |
 | `desktop.*` araçları yok | `CUA_ENABLED=true`, Docker Desktop açık, `setup.ps1 -WithCua`; bkz. [`docs/cua-setup.md`](docs/cua-setup.md) |

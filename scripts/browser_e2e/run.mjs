@@ -36,6 +36,9 @@ const FIXTURE = join(EXTENSION_DIR, "test", "fixture.html");
 const PYTHON = process.platform === "win32" ? join(ROOT, ".venv", "Scripts", "python.exe") : join(ROOT, ".venv", "bin", "python");
 const HEADED = process.env.HEADED === "1";
 const LIVE = process.argv.includes("--live");
+/** Voice E2E: fake mic fed with a backend-generated Turkish WAV, real backend + real LLM. */
+const VOICE = process.argv.includes("--voice");
+const REAL_LLM = LIVE || VOICE;
 const LIVE_TIMEOUT = 5 * 60_000;
 /** Experiment: force tool_choice="required" in the backend (see live_backend_experiment.py). */
 const TOOL_CHOICE_REQUIRED = process.argv.includes("--tool-choice-required");
@@ -58,11 +61,15 @@ function record(name, ok, detail = "") {
 
 const children = [];
 let context = null;
+const extraContexts = [];
 let staticServer = null;
 let profileDir = null;
 
 async function cleanup() {
   try { await context?.close(); } catch { /* already closed */ }
+  for (const ctx of extraContexts) {
+    try { await ctx.close(); } catch { /* already closed */ }
+  }
   staticServer?.close();
   for (const child of children) {
     if (child.exitCode === null) {
@@ -401,6 +408,231 @@ async function runLive(panel, page) {
 }
 
 // ---------------------------------------------------------------------------
+// VOICE (--voice): the backend speaks the command itself (POST /tts), the mp3
+// becomes a 16 kHz WAV that Chromium's fake microphone plays. Real STT, real
+// LLM, real TTS.
+// ---------------------------------------------------------------------------
+const VOICE_COMMAND = "Yarın saat on birde dişçi randevumu hatırlat";
+const VOICE_HOLD_MS = 5_000;
+
+async function makeVoiceWav(backendUrl) {
+  const mp3 = join(OUT, "voice-command.mp3");
+  const wav = join(OUT, "voice-command.wav");
+  const r = await fetch(`${backendUrl}/tts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: VOICE_COMMAND }),
+  });
+  const type = r.headers.get("content-type") ?? "";
+  const bytes = Buffer.from(await r.arrayBuffer());
+  record("voice: backend /tts renders the command (audio/mpeg)", r.ok && type.startsWith("audio/mpeg") && bytes.length > 1000,
+    `${r.status} ${type} ${bytes.length} B`);
+  if (!r.ok) throw new Error(`/tts failed: ${r.status} ${bytes.toString("utf8").slice(0, 200)}`);
+  writeFileSync(mp3, bytes);
+  const conv = spawnSync(PYTHON, [join(HERE, "make_voice_wav.py"), mp3, wav], { encoding: "utf8" });
+  if (conv.status !== 0) throw new Error(`mp3->wav failed: ${conv.stderr.slice(-800)}`);
+  log("voice: wav", wav, conv.stdout.trim());
+  return wav;
+}
+
+/** Track /stt and /tts traffic of the extension pages. */
+function watchVoiceTraffic(ctx) {
+  const traffic = { stt: [], tts: [] };
+  ctx.on("response", async (res) => {
+    const url = res.url();
+    const kind = /\/stt$/.test(url) ? "stt" : /\/tts$/.test(url) ? "tts" : null;
+    if (!kind) return;
+    const entry = { status: res.status(), type: res.headers()["content-type"] ?? "", at: Date.now() };
+    if (kind === "tts") entry.text = (() => { try { return JSON.parse(res.request().postData() ?? "{}").text ?? ""; } catch { return ""; } })();
+    if (kind === "stt") entry.body = await res.json().catch(() => null);
+    traffic[kind].push(entry);
+  });
+  return traffic;
+}
+
+/** Deny any confirmation (none expected: reminders.add is risk "safe"). */
+function denyConfirmations(panel) {
+  const denials = [];
+  let on = true;
+  const done = (async () => {
+    while (on) {
+      const modal = panel.locator("dialog.modal[open]");
+      if ((await modal.count()) > 0 && /Onayın gerekiyor/.test(await modal.innerText().catch(() => ""))) {
+        denials.push((await modal.innerText()).replace(/\s+/g, " ").slice(0, 160));
+        await modal.getByRole("button", { name: "Reddet" }).click().catch(() => undefined);
+      }
+      await sleep(300);
+    }
+  })();
+  return { denials, stop: async () => { on = false; await done; } };
+}
+
+function remindersInDb(workdir) {
+  // due_at is stored in UTC; report it in the backend's TIMEZONE (backend/.env).
+  const code = [
+    "import json,sqlite3,sys",
+    "from datetime import datetime",
+    "from zoneinfo import ZoneInfo",
+    "from backend.db import load_env",
+    "import os; load_env()",
+    "tz=ZoneInfo(os.environ.get('TIMEZONE') or 'Europe/Istanbul')",
+    "try:",
+    " c=sqlite3.connect(sys.argv[1])",
+    " print(json.dumps([[t, datetime.fromisoformat(d.replace('Z','+00:00')).astimezone(tz).isoformat()] for t,d in c.execute('select text, due_at from reminders')], ensure_ascii=False))",
+    "except Exception as e: print(json.dumps({'error': str(e)}))",
+  ].join("\n");
+  const r = spawnSync(PYTHON, ["-c", code, join(workdir, "assistant.db")], { encoding: "utf8", cwd: ROOT, env: { ...process.env, PYTHONUTF8: "1" } });
+  try { return JSON.parse(r.stdout.trim()); } catch { return { error: r.stderr.slice(-300) }; }
+}
+
+/**
+ * One push-to-talk turn. `press`/`release` drive the gesture (mouse or Space).
+ * Returns the finished exchange.
+ */
+async function voiceTurn(panel, traffic, label, press, release) {
+  const index = await panel.locator("article.exchange").count();
+  const sttBefore = traffic.stt.length;
+  const ttsBefore = traffic.tts.length;
+  await press();
+  const recording = await waitFor(async () => (await panel.locator(".mic-button.is-recording").count()) > 0, 5_000, "recording state")
+    .then(() => true, () => false);
+  await sleep(VOICE_HOLD_MS - 1_500);
+  const recText = await panel.locator(".input-hint").innerText().catch(() => "");
+  const recSeconds = await panel.locator(".rec-time").innerText().catch(() => "");
+  await shot(panel, `voice-${label}-recording`);
+  await sleep(1_500);
+  record(`voice/${label}: recording state shown while held`, recording && /Dinliyorum/.test(recText),
+    `${recText.replace(/\s+/g, " ")} (${recSeconds})`);
+  await release();
+  const transcribing = await waitFor(async () => /yazıya çevriliyor/.test(await panel.locator(".input-hint").innerText()), 3_000, "transcribing")
+    .then(() => true, () => false);
+  const stt = await waitFor(async () => traffic.stt[sttBefore], 60_000, "/stt response").catch(() => null);
+  record(`voice/${label}: /stt called and answered`, stt?.status === 200 && typeof stt?.body?.text === "string",
+    stt ? `${stt.status} "${stt.body?.text ?? ""}" (${stt.body?.duration_s ?? "?"}s audio)${transcribing ? "" : " [transcribing label not seen]"}` : "no /stt request");
+  const banner = async () => ((await panel.locator(".error-banner").count()) ? await panel.locator(".error-banner").innerText() : "");
+  const ex = panel.locator("article.exchange").nth(index);
+  const appeared = await ex.waitFor({ timeout: 15_000 }).then(() => true, () => false);
+  const userText = appeared ? await ex.locator(".user-message p").innerText() : "";
+  const voiceIcon = appeared ? (await ex.locator(".user-message .message-label svg").count()) > 0 : false;
+  record(`voice/${label}: transcript sent as user message`, appeared && /randevu|dişçi|dis[cç]i/i.test(userText),
+    appeared ? `"${userText}"${voiceIcon ? " [mic icon]" : " [no mic icon]"}` : `no exchange; banner: ${await banner()}`);
+  if (!appeared) return null;
+
+  const guard = denyConfirmations(panel);
+  let res;
+  try {
+    res = await waitExchange(panel, index, LIVE_TIMEOUT);
+  } finally {
+    await guard.stop();
+  }
+  await shot(panel, `voice-${label}-answer`);
+  const tools = (await res.ex.locator(".trace-step code.tool-code").allInnerTexts()).map((c) => c.split("(")[0].trim());
+  record(`voice/${label}: agents add a reminder, answer mentions 11 / randevu`,
+    !res.err && tools.includes("reminders.add") && /11/.test(res.answer) && /randevu|diş/i.test(res.answer),
+    `${res.err ? `error: ${res.err}; ` : ""}tools=${tools.join(",")}; denials=${guard.denials.length}; "${res.answer.replace(/\s+/g, " ").slice(0, 140)}"`);
+
+  const tts = await waitFor(async () => traffic.tts.slice(ttsBefore).find((t) => t.status), 45_000, "/tts response").catch(() => null);
+  const playing = await waitFor(async () => (await panel.getByText("Sesli okumayı durdur").count()) > 0, 5_000, "speaker playing")
+    .then(() => true, () => false);
+  const b = await banner();
+  record(`voice/${label}: TTS playback requested (/tts 200 audio/mpeg)`,
+    tts?.status === 200 && tts.type.startsWith("audio/mpeg") && !/otomatik sesi engelledi/.test(b),
+    tts ? `${tts.status} ${tts.type}; spoken="${(tts.text ?? "").slice(0, 100)}"; player ${playing ? "playing" : "not seen playing"}${b ? `; banner: ${b}` : ""}` : "no /tts request");
+  // Stop playback before the next turn so audio does not overlap.
+  await panel.getByText("Sesli okumayı durdur").click({ timeout: 2_000 }).catch(() => undefined);
+  return res;
+}
+
+async function runVoice(panel, extId, workdir) {
+  const traffic = watchVoiceTraffic(panel.context());
+  const fs = await panel.evaluate(async () => {
+    const st = await navigator.permissions.query({ name: "microphone" }).catch(() => null);
+    return st?.state ?? "unknown";
+  });
+  log("voice: microphone permission state in panel:", fs, "ext", extId);
+
+  // 1) mouse press-and-hold on the mic button
+  const mic = panel.getByLabel("Basılı tut ve konuş");
+  await mic.waitFor();
+  await waitFor(async () => mic.isEnabled(), 10_000, "mic enabled");
+  const box = await mic.boundingBox();
+  await voiceTurn(panel, traffic, "mouse",
+    async () => { await panel.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await panel.mouse.down(); },
+    async () => { await panel.mouse.up(); });
+
+  // 2) Space push-to-talk (focus on the page body, not a control)
+  await waitFor(async () => mic.isEnabled(), 30_000, "mic enabled again");
+  await panel.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+  await voiceTurn(panel, traffic, "space",
+    async () => { await panel.keyboard.down("Space"); },
+    async () => { await panel.keyboard.up("Space"); });
+
+  const rows = remindersInDb(workdir);
+  record("voice: reminders persisted in DB", Array.isArray(rows) && rows.length >= 1 && rows.every((r) => /T11:00/.test(r[1] ?? "")),
+    JSON.stringify(rows));
+  writeFileSync(join(OUT, "voice-traffic.json"), JSON.stringify(traffic, null, 2));
+}
+
+/** Microphone denied: no fake-ui flag, no grant -> Chromium denies getUserMedia. */
+async function runVoiceDenied(backendUrl, wav) {
+  log("voice: permission-denied flow");
+  const dir = mkdtempSync(join(tmpdir(), "polaris-chrome-deny-"));
+  const ctx = await chromium.launchPersistentContext(dir, {
+    channel: "chromium",
+    headless: !HEADED,
+    viewport: { width: 1280, height: 900 },
+    args: [`--disable-extensions-except=${EXT_OUT}`, `--load-extension=${EXT_OUT}`,
+      "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${wav}`],
+  });
+  extraContexts.push(ctx);
+  let [worker] = ctx.serviceWorkers();
+  worker ??= await ctx.waitForEvent("serviceworker", { timeout: 20_000 });
+  const extId = new URL(worker.url()).host;
+  await worker.evaluate(async (backend) => {
+    await chrome.storage.local.set({ "polaris-panel-settings": { backend, mock: false, speak: false } });
+  }, backendUrl);
+  const panel = ctx.pages()[0] ?? (await ctx.newPage());
+  await panel.goto(`chrome-extension://${extId}/src/panel/index.html`);
+  await panel.setViewportSize({ width: 420, height: 900 });
+  // Explicit deny: a "block" content setting for the extension origin is what a
+  // user who clicked "Block" ends up with. Playwright has no deny API, so an
+  // un-granted prompt in automation is dismissed (= NotAllowedError).
+  await ctx.clearPermissions();
+  const mic = panel.getByLabel("Basılı tut ve konuş");
+  await waitFor(async () => mic.isEnabled(), 20_000, "mic enabled (deny run)");
+  const pagePromise = ctx.waitForEvent("page", { timeout: 15_000 }).catch(() => null);
+  const box = await mic.boundingBox();
+  await panel.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await panel.mouse.down();
+  await sleep(1_500);
+  await panel.mouse.up();
+  const msg = await waitFor(async () => ((await panel.locator(".error-banner").count()) ? panel.locator(".error-banner").innerText() : ""), 10_000, "error banner")
+    .catch(() => "");
+  const state = await panel.locator(".input-hint").innerText().catch(() => "");
+  record("voice/denied: Turkish permission message shown", /Mikrofon izni verilmedi|izin henüz verilmedi/.test(msg), `${msg || "(no banner)"} | hint="${state}"`);
+  const grantBtn = (await panel.getByRole("button", { name: "Mikrofon izni ver" }).count()) > 0;
+  const permPage = await pagePromise;
+  if (permPage) await permPage.waitForLoadState("domcontentloaded").catch(() => undefined);
+  const permUrl = permPage?.url() ?? "";
+  const heading = permPage ? await permPage.locator("h1").innerText().catch(() => "") : "";
+  record("voice/denied: permission.html opened + 'Mikrofon izni ver' button in panel",
+    /\/src\/panel\/permission\.html$/.test(permUrl) && /Mikrofonunu/.test(heading) && grantBtn,
+    `url=${permUrl || "(none)"}; h1="${heading}"; panel button=${grantBtn}`);
+  await shot(panel, "voice-denied-panel");
+  if (permPage) {
+    // Clicking "Mikrofon izni ver" on the page while still denied explains why.
+    await permPage.locator("#grant").click();
+    const status = await waitFor(async () => {
+      const t = await permPage.locator("#status").innerText();
+      return /reddedildi|bulunamadı|alınamadı|verildi/.test(t) ? t : "";
+    }, 10_000, "permission page status").catch(() => "");
+    await shot(permPage, "voice-denied-permission-page");
+    record("voice/denied: permission page explains the denial", /reddedildi|bulunamadı|alınamadı/.test(status), status || "(no status)");
+  }
+  await ctx.close().catch(() => undefined);
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 async function main() {
@@ -412,7 +644,7 @@ async function main() {
   patchCsp(backendPort);
 
   let llmUrl = null;
-  if (!LIVE) {
+  if (!REAL_LLM) {
     log("fake LLM: starting");
     llmUrl = await startFakeLlm();
     log("fake LLM:", llmUrl);
@@ -423,15 +655,21 @@ async function main() {
   await startBackend(backendPort, llmUrl, workdir);
   log("backend: healthy");
   await startStatic(staticPort);
-  const fixtureUrl = LIVE ? "about:blank" : `http://127.0.0.1:${staticPort}/fixture.html`;
+  const fixtureUrl = REAL_LLM ? "about:blank" : `http://127.0.0.1:${staticPort}/fixture.html`;
   const backendUrl = `http://127.0.0.1:${backendPort}`;
+
+  let voiceWav = null;
+  if (VOICE) voiceWav = await makeVoiceWav(backendUrl);
 
   profileDir = mkdtempSync(join(tmpdir(), "polaris-chrome-"));
   context = await chromium.launchPersistentContext(profileDir, {
     channel: "chromium",
     headless: !HEADED,
     viewport: { width: 1280, height: 900 },
-    args: [`--disable-extensions-except=${EXT_OUT}`, `--load-extension=${EXT_OUT}`],
+    args: [
+      `--disable-extensions-except=${EXT_OUT}`, `--load-extension=${EXT_OUT}`,
+      ...(VOICE ? ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${voiceWav}`] : []),
+    ],
   });
   const consoleLog = createWriteStream(join(OUT, "console.log"));
   const watchConsole = (page, tag) => page.on("console", (m) => consoleLog.write(`[${tag}] ${m.type()}: ${m.text()}\n`));
@@ -443,9 +681,10 @@ async function main() {
   record("extension loaded (service worker up)", Boolean(extId), extId);
 
   // Settings: mock OFF, backend = our port, speech off (no audio in CI).
-  await worker.evaluate(async (backend) => {
-    await chrome.storage.local.set({ "polaris-panel-settings": { backend, mock: false, speak: false } });
-  }, backendUrl);
+  // (--voice: speech ON, the TTS path is part of the test.)
+  await worker.evaluate(async ({ backend, speak }) => {
+    await chrome.storage.local.set({ "polaris-panel-settings": { backend, mock: false, speak } });
+  }, { backend: backendUrl, speak: VOICE });
 
   const panel = context.pages()[0] ?? (await context.newPage());
   watchConsole(panel, "panel");
@@ -458,7 +697,7 @@ async function main() {
   await panel.evaluate((url) => chrome.windows.create({ url, focused: true }), fixtureUrl);
   const fixture = await fixturePromise;
   watchConsole(fixture, "fixture");
-  if (!LIVE) await armFixture(fixture);
+  if (!REAL_LLM) await armFixture(fixture);
 
   const connected = await waitFor(async () => (await panel.locator(".connection.connected").count()) > 0, 15_000, "panel connected")
     .then(() => true, () => false);
@@ -475,6 +714,13 @@ async function main() {
   if (!connected) throw new Error("panel not connected; aborting scenarios");
   if (LIVE) {
     await runLive(panel, fixture);
+    return;
+  }
+  if (VOICE) {
+    await runVoice(panel, extId, workdir);
+    await context.close().catch(() => undefined);
+    context = null;
+    await runVoiceDenied(backendUrl, voiceWav);
     return;
   }
 
@@ -588,11 +834,11 @@ try {
 }
 
 const failed = results.filter((r) => !r.ok);
-writeFileSync(join(OUT, LIVE ? "results-live.json" : "results.json"), JSON.stringify({ fatal: fatal ? String(fatal.message ?? fatal) : null, results }, null, 2));
+writeFileSync(join(OUT, VOICE ? "results-voice.json" : LIVE ? "results-live.json" : "results.json"), JSON.stringify({ fatal: fatal ? String(fatal.message ?? fatal) : null, results }, null, 2));
 log("");
 log("==================== SUMMARY ====================");
 for (const r of results) log(r.ok ? "PASS" : "FAIL", r.name);
 log(`${results.length - failed.length}/${results.length} passed${fatal ? " (aborted: " + fatal.message + ")" : ""}`);
-log(`rerun: node scripts/browser_e2e/run.mjs${LIVE ? " --live" : ""}   (artifacts: scripts/browser_e2e/out/)`);
+log(`rerun: node scripts/browser_e2e/run.mjs${LIVE ? " --live" : ""}${VOICE ? " --voice" : ""}   (artifacts: scripts/browser_e2e/out/)`);
 logFile.end();
 process.exit(failed.length || fatal ? 1 : 0);

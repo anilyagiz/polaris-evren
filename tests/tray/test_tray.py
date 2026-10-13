@@ -84,9 +84,9 @@ def test_resolve_address_env_overrides_file(tmp_path):
 
 
 def test_resolve_address_defaults_and_bad_port(tmp_path):
-    assert resolve_address(tmp_path / "missing.env", {}) == BackendAddress("127.0.0.1", 8000)
-    assert resolve_address(tmp_path / "missing.env", {"PORT": "abc"}).port == 8000
-    assert resolve_address(tmp_path / "missing.env", {"PORT": "70000"}).port == 8000
+    assert resolve_address(tmp_path / "missing.env", {}) == BackendAddress("127.0.0.1", 8765)
+    assert resolve_address(tmp_path / "missing.env", {"PORT": "abc"}).port == 8765
+    assert resolve_address(tmp_path / "missing.env", {"PORT": "70000"}).port == 8765
 
 
 def test_ensure_env_file_copies_example(tmp_path):
@@ -135,8 +135,8 @@ def test_build_command_prefers_python_m_backend(tmp_path):
 
 def test_build_command_uvicorn_fallback(tmp_path):
     paths = _fake_paths(tmp_path, with_main=False)
-    cmd = build_command(python_for_backend(paths), BackendAddress("127.0.0.1", 8000), paths.has_backend_main)
-    assert cmd[1:] == ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000"]
+    cmd = build_command(python_for_backend(paths), BackendAddress("127.0.0.1", 8765), paths.has_backend_main)
+    assert cmd[1:] == ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8765"]
 
 
 def test_build_env_sets_port_and_utf8():

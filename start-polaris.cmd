@@ -3,7 +3,7 @@ rem Polaris - tek tikla baslat. Cift tiklayin; ilk seferde kurulum yapar.
 rem   1) .venv yoksa scripts\setup.ps1 (+ whisper modeli)
 rem   2) backend\.env yoksa ornekten kopyalar ve Not Defteri'nde acar
 rem   3) extension\dist yoksa derler
-rem   4) backend'i ayri pencerede baslatir (port: PORT ortam degiskeni > backend\.env PORT > 8000)
+rem   4) backend'i ayri pencerede baslatir (port: PORT ortam degiskeni > backend\.env PORT > 8765)
 rem   5) Brave'e yukleme adimlarini yazar
 setlocal EnableExtensions
 chcp 65001 >nul
@@ -66,7 +66,7 @@ if not defined PORT (
     )
   )
 )
-if not defined PORT set "PORT=8000"
+if not defined PORT set "PORT=8765"
 
 rem cikis: 0 = port bos, 2 = Polaris zaten calisiyor, 1 = baska bir program kullaniyor
 %PSX% -Command "$c = Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $c) { exit 0 }; try { $r = Invoke-RestMethod -TimeoutSec 3 -Uri 'http://127.0.0.1:%PORT%/health'; if ($r.ok) { exit 2 } } catch {}; $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; Write-Host ('       PID ' + $c.OwningProcess + ' (' + $p.ProcessName + ')'); exit 1"

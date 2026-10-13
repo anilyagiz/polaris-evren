@@ -40,7 +40,7 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) esaslıdır; sü
 
 - **`start-polaris.cmd`** — çift tıkla başlat: ilk seferde kurulum (+ whisper modeli),
   `backend\.env` oluşturup Not Defteri'nde açma, extension derleme, backend'i başlatma,
-  Brave "paketlenmemiş uzantı" adımlarını yazdırma. Port 8000 doluysa ne yapılacağını
+  Brave "paketlenmemiş uzantı" adımlarını yazdırma. Port 8765 doluysa ne yapılacağını
   söyler; `PORT` ile başka port seçilebilir.
 - **Sistem tepsisi uygulaması** (`Polaris.exe` / `python -m tray`): backend'i gizli
   çalıştırır, saatin yanında Polaris yıldızı simgesi.

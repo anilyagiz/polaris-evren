@@ -67,11 +67,11 @@ Repo **kökünden** çalıştırın (`backend` bir pakettir):
 ```powershell
 cd <repo-kökü>
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1     # venv + paketler + .env + npm install (-DownloadModels: whisper modeli)
-.\scripts\run-backend.ps1                                      # uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+.\scripts\run-backend.ps1                                      # uvicorn backend.main:app --host 127.0.0.1 --port 8765 --reload
 # elle: py -3.12 -m venv .venv ; .venv\Scripts\activate ; pip install -r backend\requirements.txt
 ```
 
-Doğrulama: tarayıcıda <http://localhost:8000/health> → `{"ok": true}`
+Doğrulama: tarayıcıda <http://localhost:8765/health> → `{"ok": true}`
 
 İlk `POST /stt` çağrısında faster-whisper modeli (~460 MB, `small`) indirilir;
 bu normaldir, bir kez olur ve bellekte kalır (ilk çağrı ~4,8 sn; sonrakiler ~2,1 sn).
@@ -90,7 +90,7 @@ bu normaldir, bir kez olur ve bellekte kalır (ilk çağrı ~4,8 sn; sonrakiler 
 1. Brave'de `brave://extensions` adresini aç.
 2. Sağ üstteki **Geliştirici modu**nu aç.
 3. **Paketlenmemiş uzantıyı yükle** → `extension\dist` klasörünü seç.
-4. Paneldeki **Ayarlar** → Backend adresi: `http://localhost:8000` (varsayılan bu).
+4. Paneldeki **Ayarlar** → Backend adresi: `http://localhost:8765` (varsayılan bu).
 
 ### Mikrofon izni
 
@@ -161,7 +161,7 @@ sırasında `--reload` kullanmayın.
 | `BRAVE_API_KEY ayarlanmamış` | `.env` içinde doldur ve **uvicorn'ı yeniden başlat**. |
 | `web.search` boş dönüyor | `.env` içinde `BRAVE_API_KEY` var mı, **uvicorn yeniden başlatıldı mı**? |
 | Brave **429** | Aylık istek limiti doldu; bekle veya `count` değerini düşür. `web.search` anlaşılır bir hata döner, otomatik tekrar denemez. |
-| Panel "Bağlantı yok" | uvicorn çalışıyor mu? `http://localhost:8000/health`. Ayarlardaki backend adresini kontrol et. |
+| Panel "Bağlantı yok" | uvicorn çalışıyor mu? `http://localhost:8765/health`. Ayarlardaki backend adresini kontrol et. |
 | Mikrofon izni reddedildi | `brave://settings/content/microphone` → siteye izin ver. |
 | Hatırlatıcı 3 saat erken/geç geliyor | `tzdata` kurulu mu (`pip install tzdata`)? `TIMEZONE` çözülemezse kod sabit +03:00'a düşer ve **uyarı loglar**; UTC'ye düşmez. |
 | `ZoneInfo` hatası (reminders) | `pip install tzdata` (requirements.txt'de var). |
