@@ -18,7 +18,7 @@ from .health import (
     find_free_port, port_in_use,
 )
 from .paths import Paths, get_paths
-from .settings import BackendAddress, ensure_env_file, resolve_address
+from .settings import FALLBACK_PORTS, BackendAddress, ensure_env_file, resolve_address
 from . import ui
 
 log = logging.getLogger("tray")
@@ -81,11 +81,17 @@ class Controller:
                     log.info("port %s zaten bir Polaris backend'inde; ona bağlanılıyor", addr.port)
                     self.external = True
                     return
-                self.error = f"port {addr.port} dolu"
-                self.wanted_running = False
-                log.warning("port %s başka bir program tarafından kullanılıyor", addr.port)
-                self._alert(ui.PORT_BUSY.format(port=addr.port))
-                return
+                alt = self._free_candidate(addr)
+                if alt is None:
+                    self.error = f"port {addr.port} dolu"
+                    self.wanted_running = False
+                    log.warning("port %s başka bir program tarafından kullanılıyor", addr.port)
+                    self._alert(ui.PORT_BUSY.format(port=addr.port))
+                    return
+                log.warning("port %s dolu; Polaris %s portunda başlatılıyor (panel kendisi bulur)",
+                            addr.port, alt.port)
+                self.address = alt
+                self.backend.address = alt
             self.external = False
             try:
                 self.backend.start()
@@ -95,6 +101,14 @@ class Controller:
                 log.exception("backend başlatılamadı")
                 self._alert(f"Polaris sunucusu başlatılamadı:\n{exc}\n\nKurulum (.venv) tamam mı? "
                             f"Ayrıntı: {self.paths.backend_log}")
+
+    def _free_candidate(self, addr: BackendAddress) -> BackendAddress | None:
+        """Next free port from the list the panel also probes (FALLBACK_PORTS)."""
+
+        for port in FALLBACK_PORTS:
+            if port != addr.port and not self._port_check(addr.probe_host, port):
+                return BackendAddress(addr.host, port)
+        return None
 
     def stop(self) -> None:
         with self._lock:

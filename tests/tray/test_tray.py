@@ -367,3 +367,13 @@ def test_icons_render_all_variants():
         img = make_icon(color)
         assert img.size == (64, 64) and img.mode == "RGBA"
     assert make_icon("gold").getpixel((32, 12)) != make_icon("grey").getpixel((32, 12))
+
+
+def test_controller_falls_back_to_next_free_port(tmp_path):
+    busy = {8123, 8765}
+    ctrl = Controller(Paths(tmp_path), address=BackendAddress("127.0.0.1", 8123), backend=StubBackend(),
+                      fetch=lambda url: None, port_check=lambda h, p: p in busy,
+                      alert=lambda text: None, notify=lambda text: None)
+    ctrl.start()
+    assert ctrl.backend.starts == 1 and ctrl.error == ""
+    assert ctrl.address.port == 8766 and ctrl.backend.address.port == 8766

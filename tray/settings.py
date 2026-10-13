@@ -14,6 +14,8 @@ from typing import Mapping
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+#: Tried in order when the configured port is taken; the panel probes the same list.
+FALLBACK_PORTS = (8765, 8766, 8767, 47615, 47616)
 
 
 def parse_env_text(text: str) -> dict[str, str]:

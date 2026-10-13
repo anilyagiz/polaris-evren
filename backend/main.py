@@ -219,6 +219,7 @@ async def health() -> dict[str, Any]:
 
     return {
         "ok": True,
+        "service": "polaris",
         "version": APP_VERSION,
         "llm_model": settings.llm_model,
         "cua_enabled": settings.cua_enabled,

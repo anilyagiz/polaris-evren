@@ -35,7 +35,7 @@ def parse_health(payload: Any) -> HealthInfo:
 
     if not isinstance(payload, dict):
         return HealthInfo(ok=False)
-    polaris = "ok" in payload and ("llm_model" in payload or "llm_configured" in payload)
+    polaris = payload.get("service") == "polaris" or ("ok" in payload and ("llm_model" in payload or "llm_configured" in payload))
     stt = payload.get("stt_ready")
     return HealthInfo(
         ok=payload.get("ok") is True,

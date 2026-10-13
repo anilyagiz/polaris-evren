@@ -9,6 +9,7 @@ export interface Health {
   stt_ready: boolean | null;
   brave_configured: boolean | null;
   version: string | null;
+  service: string | null;
 }
 export type HealthState =
   | { kind: "checking" }
@@ -36,6 +37,7 @@ export function parseHealth(value: unknown): Health | null {
     stt_ready: bool(raw.stt_ready),
     brave_configured: bool(raw.brave_configured),
     version: text(raw.version),
+    service: text(raw.service),
   };
 }
 
@@ -79,4 +81,35 @@ export async function checkHealth(
   } finally {
     clearTimeout(timer);
   }
+}
+
+
+/**
+ * Ports the Polaris tray tries, in order, when its configured port is taken
+ * (tray/settings.py FALLBACK_PORTS). The panel probes the same list.
+ */
+export const FALLBACK_PORTS = [8765, 8766, 8767, 47615, 47616];
+
+const isLocal = (backend: string) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/i.test(backend.trim());
+
+/**
+ * When the configured local backend is not Polaris, look for one on the
+ * fallback ports. Returns the base URL of a backend that identifies itself as
+ * Polaris, or null. Remote (non-localhost) addresses are never rewritten.
+ */
+export async function discoverBackend(
+  current: string,
+  probe: typeof checkHealth = checkHealth,
+): Promise<string | null> {
+  if (!isLocal(current)) return null;
+  const host = /127\.0\.0\.1/.test(current) ? "127.0.0.1" : "localhost";
+  const normalizedCurrent = current.trim().replace(/\/+$/, "");
+  for (const port of FALLBACK_PORTS) {
+    const candidate = `http://${host}:${port}`;
+    if (candidate === normalizedCurrent) continue;
+    const result = await probe(candidate, 1200);
+    if (result.kind === "ok" && result.health.service === "polaris") return candidate;
+  }
+  return null;
 }

@@ -153,7 +153,7 @@ def config_warnings(settings: Settings | None = None) -> list[str]:
     if not s.llm_model_explicit:
         warnings.append(f"LLM_MODEL tanımlı değil: varsayılan model '{s.llm_model}' kullanılıyor.")
     if not s.brave_configured:
-        warnings.append("BRAVE_API_KEY tanımlı değil: web araması (web.search) çalışmayacak.")
+        warnings.append("BRAVE_API_KEY tanımlı değil: web araması anahtarsız DuckDuckGo yedeğiyle yapılacak.")
     return warnings
 
 

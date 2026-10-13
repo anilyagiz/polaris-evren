@@ -24,7 +24,7 @@ import {
   Timeline,
 } from "./components";
 import { friendlyError, type FriendlyError } from "./errors";
-import { checkHealth, type HealthState } from "./health";
+import { checkHealth, discoverBackend, type HealthState } from "./health";
 import {
   normalizeBackend,
   requestId,
@@ -138,7 +138,18 @@ export default function App({
   const runHealth = useCallback(async () => {
     const sequence = ++healthSeq.current;
     setHealthChecking(true);
-    const result = await checkHealth(settingsRef.current.backend);
+    let result = await checkHealth(settingsRef.current.backend);
+    if (result.kind === "unreachable") {
+      // The tray may have moved Polaris to a fallback port; follow it.
+      const found = await discoverBackend(settingsRef.current.backend);
+      if (found && sequence === healthSeq.current) {
+        const next = { ...settingsRef.current, backend: found };
+        settingsRef.current = next;
+        await saveSettings(next);
+        setSettings(next);
+        result = await checkHealth(found);
+      }
+    }
     if (sequence !== healthSeq.current) return;
     setHealthChecking(false);
     setHealth(result);
