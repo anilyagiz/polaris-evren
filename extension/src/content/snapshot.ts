@@ -15,6 +15,7 @@ import {
   type SnapshotElement,
 } from "./types";
 import {
+  type ClipCache,
   REF_ATTRIBUTE,
   accessibleName,
   collapseWhitespace,
@@ -185,9 +186,13 @@ export function takeSnapshot(): Snapshot {
     measured.length = MAX_CANDIDATES;
   }
 
+  // Candidates share nearly all of their ancestors, so the clipping walk is
+  // measured once per ancestor instead of once per candidate.
+  const clipCache: ClipCache = new Map();
+
   const candidates: Candidate[] = [];
   for (const { element, rect, priority } of measured) {
-    if (isDisabled(element) || !isVisible(element, rect)) {
+    if (isDisabled(element) || !isVisible(element, rect, clipCache)) {
       continue;
     }
     const role = roleOf(element);

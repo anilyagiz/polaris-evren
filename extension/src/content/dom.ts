@@ -62,7 +62,47 @@ const MAX_CLIP_DEPTH = 20;
  * `contain`ed ancestor does become the containing block of a fixed box and can
  * clip it; we accept that rare stray ref rather than lose every fixed panel.)
  */
-function isClippedAway(element: Element, rect: DOMRect, position: string): boolean {
+/**
+ * What an ancestor contributes to the clipping decision. Candidates on a real
+ * page share almost all of their ancestors, so measuring each one once per
+ * snapshot turns thousands of `getComputedStyle` calls into a few hundred —
+ * measured on github.com: 55.3 ms -> see test/NOTES.md.
+ */
+interface ClipFacts {
+  /** Does this ancestor clip its overflow at all? */
+  clips: boolean;
+  /** Its viewport box, read only when it clips. */
+  box: DOMRect | null;
+  /** A fixed ancestor ends the walk: it is positioned against the viewport. */
+  fixed: boolean;
+}
+
+export type ClipCache = Map<Element, ClipFacts>;
+
+function clipFactsOf(parent: Element, cache?: ClipCache): ClipFacts {
+  const cached = cache?.get(parent);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const style = window.getComputedStyle(parent);
+  const overflow = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
+  const clips = /hidden|clip|scroll|auto/.test(overflow);
+  const facts: ClipFacts = {
+    clips,
+    box: clips ? parent.getBoundingClientRect() : null,
+    fixed: style.position === "fixed",
+  };
+  cache?.set(parent, facts);
+  return facts;
+}
+
+function isClippedAway(
+  element: Element,
+  rect: DOMRect,
+  position: string,
+  cache?: ClipCache,
+): boolean {
   if (position === "fixed") {
     return false;
   }
@@ -71,10 +111,9 @@ function isClippedAway(element: Element, rect: DOMRect, position: string): boole
   let depth = 0;
 
   while (parent !== null && parent !== document.documentElement && depth < MAX_CLIP_DEPTH) {
-    const style = window.getComputedStyle(parent);
-    const overflow = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
-    if (/hidden|clip|scroll|auto/.test(overflow)) {
-      const box = parent.getBoundingClientRect();
+    const facts = clipFactsOf(parent, cache);
+    if (facts.clips && facts.box !== null) {
+      const box = facts.box;
       if (box.width < MIN_INTERACTIVE_SIZE || box.height < MIN_INTERACTIVE_SIZE) {
         return true;
       }
@@ -87,7 +126,7 @@ function isClippedAway(element: Element, rect: DOMRect, position: string): boole
         return true;
       }
     }
-    if (style.position === "fixed") {
+    if (facts.fixed) {
       return false;
     }
     parent = parent.parentElement;
@@ -114,7 +153,7 @@ function isScreenReaderOnly(style: CSSStyleDeclaration): boolean {
  * `knownRect` lets a caller that has already measured the element skip a second
  * layout read, and keeps the visibility verdict and the reported bbox in sync.
  */
-export function isVisible(element: Element, knownRect?: DOMRect): boolean {
+export function isVisible(element: Element, knownRect?: DOMRect, cache?: ClipCache): boolean {
   const rect = knownRect ?? element.getBoundingClientRect();
   if (rect.width < MIN_INTERACTIVE_SIZE || rect.height < MIN_INTERACTIVE_SIZE) {
     return false;
@@ -125,7 +164,7 @@ export function isVisible(element: Element, knownRect?: DOMRect): boolean {
 
   // One computed style for all three checks below.
   const style = window.getComputedStyle(element);
-  if (isScreenReaderOnly(style) || isClippedAway(element, rect, style.position)) {
+  if (isScreenReaderOnly(style) || isClippedAway(element, rect, style.position, cache)) {
     return false;
   }
 

@@ -37,17 +37,32 @@
   }
   var MIN_INTERACTIVE_SIZE = 2;
   var MAX_CLIP_DEPTH = 20;
-  function isClippedAway(element, rect, position) {
+  function clipFactsOf(parent, cache) {
+    const cached = cache?.get(parent);
+    if (cached !== void 0) {
+      return cached;
+    }
+    const style = window.getComputedStyle(parent);
+    const overflow = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
+    const clips = /hidden|clip|scroll|auto/.test(overflow);
+    const facts = {
+      clips,
+      box: clips ? parent.getBoundingClientRect() : null,
+      fixed: style.position === "fixed"
+    };
+    cache?.set(parent, facts);
+    return facts;
+  }
+  function isClippedAway(element, rect, position, cache) {
     if (position === "fixed") {
       return false;
     }
     let parent = element.parentElement;
     let depth = 0;
     while (parent !== null && parent !== document.documentElement && depth < MAX_CLIP_DEPTH) {
-      const style = window.getComputedStyle(parent);
-      const overflow = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
-      if (/hidden|clip|scroll|auto/.test(overflow)) {
-        const box = parent.getBoundingClientRect();
+      const facts = clipFactsOf(parent, cache);
+      if (facts.clips && facts.box !== null) {
+        const box = facts.box;
         if (box.width < MIN_INTERACTIVE_SIZE || box.height < MIN_INTERACTIVE_SIZE) {
           return true;
         }
@@ -55,7 +70,7 @@
           return true;
         }
       }
-      if (style.position === "fixed") {
+      if (facts.fixed) {
         return false;
       }
       parent = parent.parentElement;
@@ -70,7 +85,7 @@
     const clip = style.clip.replace(/px|\s/g, "");
     return clip === "rect(0,0,0,0)" || clip === "rect(1,1,1,1)";
   }
-  function isVisible(element, knownRect) {
+  function isVisible(element, knownRect, cache) {
     const rect = knownRect ?? element.getBoundingClientRect();
     if (rect.width < MIN_INTERACTIVE_SIZE || rect.height < MIN_INTERACTIVE_SIZE) {
       return false;
@@ -79,7 +94,7 @@
       return false;
     }
     const style = window.getComputedStyle(element);
-    if (isScreenReaderOnly(style) || isClippedAway(element, rect, style.position)) {
+    if (isScreenReaderOnly(style) || isClippedAway(element, rect, style.position, cache)) {
       return false;
     }
     const withCheck = element;
@@ -851,9 +866,10 @@
       measured.sort((a, b) => a.priority - b.priority);
       measured.length = MAX_CANDIDATES;
     }
+    const clipCache = /* @__PURE__ */ new Map();
     const candidates = [];
     for (const { element, rect, priority } of measured) {
-      if (isDisabled(element) || !isVisible(element, rect)) {
+      if (isDisabled(element) || !isVisible(element, rect, clipCache)) {
         continue;
       }
       const role = roleOf(element);

@@ -29,17 +29,28 @@ npx esbuild src/dev/probe.entry.ts --bundle --format=iife --target=chrome110 \
 | hepsiburada.com/ara?q=mekanik+klavye | 4.373 | 615 | **150 (tavan)** | 13,0 ms | 39,8 ms | 1372 |
 | httpbin.org/forms/post | 46 | 13 | 13 | 1,2 ms | 9,6 ms | 181 |
 
-**UYARI: yukarıdaki tablo denetim öncesi algoritmaya ait.** Denetimden sonra yalnızca en
-ağır sayfa yeniden ölçüldü:
+**Yukarıdaki tablo denetim öncesi algoritmaya ait.** Denetim sonrası yeniden ölçüm:
 
-| Sayfa | Aday | Öğe | Medyan | En kötü |
-|---|---|---|---|---|
-| hepsiburada.com/ara (denetim sonrası) | 615 | 150 (tavan) | **19,4 ms** | **22,6 ms** |
+| Sayfa | Aday | Öğe | Medyan | En kötü | Önce | Değişim |
+|---|---|---|---|---|---|---|
+| github.com/trycua/cua | 566 | 150 (tavan) | **4,3 ms** | 5,3 ms | 13,0 ms | **3,0× hızlı** |
+| hepsiburada.com/ara | 615 | 150 (tavan) | **6,4 ms** | 7,7 ms | 13,0 ms | **2,0× hızlı** |
+| tr.wikipedia.org · Klavye | 605 | 150 (tavan) | **6,9 ms**\* | 7,6 ms | 12,4 ms | 1,8× hızlı |
+| search.brave.com | 177 | 80 | **9,4 ms** | 11,1 ms | 2,9 ms | 3,2× yavaş |
 
-Medyan 13,0 → 19,4 ms arttı (aday başına ek rect ölçüm pass'i + `getComputedStyle`),
-en kötü durum 39,8 → 22,6 ms düştü. Hedef 300 ms'in hâlâ çok altında. Kazanç: arama
-kutusu artık ilk 6 öğede (`[5] textbox "Site içinde ara"`), eskiden listede çok geriydi.
-Diğer dört sayfa yeniden ölçülmedi.
+\* Wikipedia satırı, aşağıdaki önbellek düzeltmesinden **önce** ölçüldü; önbellekle daha
+da hızlı olması beklenir, yeniden ölçülmedi. httpbin (13 aday) yeniden ölçülmedi —
+önbellekten etkilenmeyecek kadar küçük.
+
+**Yol boyunca bulunan performans regresyonu.** Denetim düzeltmelerinden sonra GitHub ilk
+ölçümde **55,3 ms**'ye çıkmıştı (13,0 ms'den 4× yavaş): aday başına ata zincirinde
+`getComputedStyle` çağrılıyordu ve GitHub'ın derin DOM'unda bu 596 aday × ~10 ata
+ediyordu. Adaylar atalarının neredeyse tamamını paylaştığı için `ClipCache` eklendi —
+her ata snapshot başına bir kez ölçülüyor. 55,3 → 4,3 ms.
+
+Brave Search'teki yavaşlama (2,9 → 9,4 ms) gerçek: `isScreenReaderOnly` artık aday başına
+bir `getComputedStyle` istiyor ve o sayfada ata paylaşımı az. 300 ms hedefinin yanında
+önemsiz, karşılığında sr-only ve kırpılmış öğeler listeye sızmıyor.
 
 ## Testte bulunup düzeltilenler
 
