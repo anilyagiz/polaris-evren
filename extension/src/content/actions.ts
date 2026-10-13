@@ -30,6 +30,7 @@ import {
   waitForDomIdle,
 } from "./dom";
 import { highlightElement } from "./highlight";
+import { announce, describeStep, labelFor, pointAt, press, typeProgressively } from "./hand";
 
 const REF_NOT_FOUND = "ref bulunamadı, yeni snapshot al";
 
@@ -167,6 +168,21 @@ function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: 
     element.value = value;
   }
   dispatchInputAndChange(element, value);
+}
+
+/** One intermediate keystroke of the visible typing: `input` only, no `change`. */
+function setPartialValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const setter = nativeValueSetter(element);
+  if (setter !== null) {
+    setter(value);
+  } else {
+    element.value = value;
+  }
+  const input =
+    typeof InputEvent === "function"
+      ? new InputEvent("input", { bubbles: true, data: value.slice(-1), inputType: "insertText" })
+      : new Event("input", { bubbles: true });
+  element.dispatchEvent(input);
 }
 
 function dispatchEnter(element: HTMLElement): void {
@@ -336,6 +352,9 @@ export async function click(args: Record<string, unknown>): Promise<ToolResponse
   }
 
   await scrollIntoView(element);
+  // The visible hand: glide onto the target, press, then the real click.
+  await pointAt(element, labelFor(args, describeStep("click", element)));
+  await press();
   try {
     element.focus({ preventScroll: true });
   } catch {
@@ -365,6 +384,7 @@ export async function type(args: Record<string, unknown>): Promise<ToolResponse<
   }
 
   await scrollIntoView(element);
+  await pointAt(element, labelFor(args, describeStep("type", element)));
   try {
     element.focus({ preventScroll: true });
   } catch {
@@ -387,6 +407,10 @@ export async function type(args: Record<string, unknown>): Promise<ToolResponse<
     const limit = element.maxLength;
     const wanted = limit > 0 && text.length > limit ? text.slice(0, limit) : text;
 
+    // Typed like a person (visible, progressive), then the full value is set
+    // once more the React-safe way so the final state never depends on how the
+    // page reacted to the intermediate keystrokes.
+    await typeProgressively(wanted, (partial) => setPartialValue(element, partial));
     setNativeValue(element, wanted);
 
     // Empty after a non-empty write = the value was rejected outright
@@ -488,6 +512,10 @@ export async function scroll(args: Record<string, unknown>): Promise<ToolRespons
   }
 
   const down = direction === "down";
+  await announce(
+    labelFor(args, down ? "Sayfayı aşağı kaydırıyorum" : "Sayfayı yukarı kaydırıyorum"),
+    down ? "down" : "up",
+  );
   const page = document.scrollingElement ?? document.documentElement;
   const sign = down ? 1 : -1;
 
@@ -539,6 +567,9 @@ export async function read(args: Record<string, unknown>): Promise<ToolResponse<
       return fail(target.error);
     }
     const { element } = target;
+    if (element.isConnected) {
+      await pointAt(element, labelFor(args, describeStep("read", element)));
+    }
 
     // An `<input>` has no text nodes (so `extractVisibleText` is empty) and a
     // `<select>` would otherwise return every option instead of the chosen one.
@@ -557,6 +588,7 @@ export async function read(args: Record<string, unknown>): Promise<ToolResponse<
     return ok({ text: truncate(text, MAX_READ_LENGTH) });
   }
 
+  void announce(labelFor(args, "Sayfayı okuyorum"));
   const text = extractVisibleText(mainContentRoot(), MAX_READ_LENGTH);
   return ok({ text: truncate(text, MAX_READ_LENGTH) });
 }
@@ -568,6 +600,8 @@ export async function highlight(
   if ("error" in target) {
     return fail(target.error);
   }
+  await scrollIntoView(target.element);
+  await pointAt(target.element, labelFor(args, describeStep("highlight", target.element)));
   await highlightElement(target.element);
   return ok({ ok: true });
 }

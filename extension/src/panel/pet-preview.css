@@ -1,0 +1,68 @@
+body {
+  min-height: 100dvh;
+}
+.pet-preview-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 56px 24px 32px;
+  text-align: center;
+}
+.pet-preview-page h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 36px;
+  line-height: 1.2;
+  letter-spacing: -1px;
+  margin: 12px 0;
+}
+.pet-preview-intro {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.pet-preview-stage {
+  display: grid;
+  place-items: center;
+  min-height: 310px;
+  margin: 30px 0 22px;
+  background: radial-gradient(
+    ellipse at center,
+    rgb(242 200 121 / 18%),
+    transparent 68%
+  );
+  border: 1px solid var(--line);
+  border-radius: 24px;
+}
+.pet-preview-states {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.pet-preview-states button {
+  font-size: 11px;
+  padding: 8px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+.pet-preview-states button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.pet-preview-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  margin-top: 24px;
+}
+@media (max-width: 400px) {
+  .pet-preview-page {
+    padding: 36px 18px;
+  }
+  .pet-preview-page h1 {
+    font-size: 30px;
+  }
+}

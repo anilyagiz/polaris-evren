@@ -1,0 +1,299 @@
+.polaris-pet-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--star, #b8862c);
+  cursor: pointer;
+  outline-offset: 3px;
+  border-radius: 22px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.polaris-pet-button svg {
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+.polaris-pet-button:focus-visible {
+  outline: 2px solid var(--focus, #c99335);
+}
+
+.pet-character {
+  transform-origin: var(--pet-center-x, 100px) 98px;
+  animation: polaris-float 3.6s ease-in-out infinite;
+}
+.pet-star-head {
+  transform-origin: 100px 75px;
+  transition:
+    transform 0.25s ease,
+    filter 0.3s ease;
+}
+.pet-pupils {
+  transform: translate(var(--pet-look-x, 0), var(--pet-look-y, 0));
+  transition: transform 0.12s ease;
+}
+.pet-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: polaris-blink 5.5s ease-in-out infinite;
+}
+.pet-aura {
+  transform-origin: var(--pet-center-x, 100px) 98px;
+  opacity: 0.55;
+  transition: opacity 0.3s ease;
+}
+.pet-comet-tail {
+  opacity: 0.48;
+  transform-origin: 125px 100px;
+  transition: opacity 0.3s ease;
+}
+.pet-trail-particles {
+  animation: polaris-dust 3s ease-in-out infinite;
+}
+.pet-stardust {
+  animation: polaris-twinkle 3s ease-in-out infinite;
+}
+.pet-sheen {
+  transform: translateX(-130px);
+}
+.pet-brows {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.pet-greeting .pet-star-head {
+  transform: rotate(var(--pet-tilt, 0deg));
+  filter: drop-shadow(0 0 7px #f4cd7d88);
+}
+.pet-greeting .pet-brows,
+.pet-listening .pet-brows,
+.pet-waiting .pet-brows {
+  opacity: 1;
+}
+.pet-greeting .pet-aura,
+.pet-working .pet-aura {
+  opacity: 1;
+  animation: polaris-glow 2.3s ease-in-out infinite;
+}
+.pet-greeting .pet-sheen,
+.pet-working .pet-sheen {
+  animation: polaris-shine 2.8s ease-in-out infinite;
+}
+.pet-working .pet-comet-tail {
+  opacity: 1;
+  animation: polaris-tail 2.6s ease-in-out infinite;
+}
+.pet-working .pet-character {
+  animation: polaris-flight 2.6s ease-in-out infinite;
+}
+.pet-idle .pet-aura {
+  opacity: 0.15;
+}
+.pet-idle .pet-stardust {
+  opacity: 0;
+  animation: none;
+}
+.pet-idle.pet-greeting .pet-aura {
+  opacity: 1;
+}
+.pet-idle.pet-greeting .pet-stardust {
+  animation: polaris-twinkle 3s ease-in-out infinite;
+}
+.pet-working .pet-trail-particles {
+  animation: polaris-dust 1.8s ease-out infinite;
+}
+.pet-listening .pet-soundwaves {
+  animation: polaris-twinkle 1.4s ease-in-out infinite;
+}
+.pet-speaking .pet-mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: polaris-talk 0.35s ease-in-out infinite;
+}
+.pet-celebrate .pet-stardust {
+  transform-origin: 126px 98px;
+  animation: polaris-celebrate 0.9s ease-out 2;
+}
+.pet-greeting-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 94%;
+  transform: translate(-50%, 5px);
+  background: var(--surface, #fffdf8);
+  color: var(--ink, #0b1020);
+  border: 1px solid var(--line, #e3ddcf);
+  box-shadow: var(--shadow-sm);
+  padding: 5px 9px;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+  pointer-events: none;
+  z-index: 3;
+}
+.pet-greeting .pet-greeting-bubble {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.pet-compact .pet-greeting-bubble {
+  left: 0;
+  bottom: auto;
+  top: 100%;
+  transform: translate(0, 0);
+}
+.pet-compact.pet-greeting .pet-greeting-bubble {
+  transform: translate(0, 3px);
+}
+.welcome .pet-welcome {
+  display: flex;
+  justify-content: center;
+  margin: -5px 0 2px;
+}
+.pet-dock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  margin: -5px 0 3px;
+  min-width: 0;
+}
+.pet-dock-copy {
+  min-width: 0;
+}
+.pet-dock-copy strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.pet-dock-copy p {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+.pet-header {
+  display: flex;
+  align-items: center;
+  margin: -7px -3px -7px -6px;
+}
+
+@keyframes polaris-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(2deg);
+  }
+}
+@keyframes polaris-flight {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(-3deg);
+  }
+  50% {
+    transform: translate(5px, -5px) rotate(3deg);
+  }
+}
+@keyframes polaris-blink {
+  0%,
+  42%,
+  46%,
+  100% {
+    transform: scaleY(1);
+  }
+  44% {
+    transform: scaleY(0.07);
+  }
+}
+@keyframes polaris-twinkle {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes polaris-glow {
+  0%,
+  100% {
+    transform: scale(0.93);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+@keyframes polaris-tail {
+  0%,
+  100% {
+    transform: scaleX(0.94) rotate(-2deg);
+  }
+  50% {
+    transform: scaleX(1.04) rotate(2deg);
+  }
+}
+@keyframes polaris-dust {
+  0% {
+    transform: translate(5px, -3px);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(-9px, 7px);
+    opacity: 0;
+  }
+}
+@keyframes polaris-shine {
+  0%,
+  25% {
+    transform: translateX(-130px);
+  }
+  65%,
+  100% {
+    transform: translateX(140px);
+  }
+}
+@keyframes polaris-talk {
+  0%,
+  100% {
+    transform: scaleY(0.6);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes polaris-celebrate {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.18);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .polaris-pet-button * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .pet-greeting .pet-greeting-bubble {
+    opacity: 1;
+  }
+}

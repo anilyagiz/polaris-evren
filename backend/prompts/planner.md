@@ -22,6 +22,9 @@ hangi aracın hangi sırayla kullanılacağını yazarsın.
    üretmeyi tarif eden bir plan yaz.
 7. Riskli işlem (gönderme, satın alma, silme vb.) isteği açıkça verilmediyse
    plana böyle bir adım koyma.
+7b. Kullanıcı belirli bir siteyi açmak istiyorsa ("Vikipedi'yi aç ve ...") veya
+   aktif sekme boşsa ilk adım `browser.open ile <site> adresini yeni sekmede aç`
+   olsun; sonraki adımlar o sekmede çalışır.
 8. `id` alanları 1'den başlayarak sırayla artar.
 9. Cevabın **sadece** geçerli JSON olsun: markdown, kod bloğu, açıklama ekleme.
 10. Türkçe yaz; `action` ve `why` alanları kısa (tek cümle) olsun.
@@ -54,7 +57,8 @@ Yalnızca bu araç listesindeki araçları planla; listede olmayan araç uydurma
 
 Kullanıcı isteği: "İstanbul'da yarın hava durumu nasıl olacak?"
 Router kararı: `web_search`
-Bu rota için kullanılabilir araçlar: `web.search`, `browser.read`, `browser.navigate`
+Bu rota için kullanılabilir araçlar: `web.search`, `browser.read`, `browser.navigate`,
+`browser.open`
 
 ```json
 {
@@ -79,7 +83,7 @@ Bu rota için kullanılabilir araçlar: `web.search`, `browser.read`, `browser.n
 Kullanıcı isteği: "Şu sitede 2 kişilik masa ayır."
 Router kararı: `browser_task`
 Bu rota için kullanılabilir araçlar: `browser.snapshot`, `browser.click`,
-`browser.type`, `browser.navigate`, `browser.scroll`, `browser.read`
+`browser.type`, `browser.navigate`, `browser.open`, `browser.scroll`, `browser.read`
 
 ```json
 {

@@ -11,7 +11,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { executeBrowserTool } from "../bridge/executeTool";
+import { executeBrowserTool, taskTabOf } from "../bridge/executeTool";
 import {
   ConfirmModal,
   CopyButton,
@@ -27,6 +27,7 @@ import {
 import { friendlyError, type FriendlyError } from "./errors";
 import { checkHealth, discoverBackend, type HealthState } from "./health";
 import { prettyModel } from "./llm";
+import { PolarisPet, type PetMood } from "./PolarisPet";
 import {
   normalizeBackend,
   requestId,
@@ -45,6 +46,7 @@ import {
 } from "./settings";
 import { useRecorder, useSpeaker } from "./voice";
 import { connectSocket, type OnEvent, type OnStatus, type Transport } from "./ws";
+import { DESKTOP_SUGGESTIONS, DESKTOP_BROWSER_ERROR, isDesktopMode } from "./runtime";
 
 interface Request {
   id: string;
@@ -262,8 +264,33 @@ export default function App({
       try {
         if (!event.name.startsWith("browser."))
           throw new Error("Panel yalnızca browser.* araçlarını çalıştırır.");
-        if (!tab) throw new Error("Bu görev için aktif sekme bulunamadı.");
-        result = await executeBrowserTool(event.name, event.args, tab.id);
+        // Desktop window (/app/): no extension APIs, the agents explain instead.
+        if (isDesktopMode()) throw new Error(DESKTOP_BROWSER_ERROR);
+        // Opening/navigating needs no current page; everything else does.
+        const opens =
+          event.name === "browser.open" || event.name === "browser.navigate";
+        if (!tab && !opens)
+          throw new Error("Bu görev için aktif sekme bulunamadı.");
+        // request_id = task id: once browser.open moved the task to a new
+        // tab, the bridge keeps sending later calls there.
+        result = await executeBrowserTool(
+          event.name,
+          event.args,
+          tab?.id,
+          event.request_id,
+        );
+        const moved = taskTabOf(event.request_id);
+        if (result.ok && opens && moved !== undefined && moved !== tab?.id) {
+          const data = (result.data ?? {}) as { url?: unknown; title?: unknown };
+          update(event.request_id, (request) => ({
+            ...request,
+            tab: {
+              id: moved,
+              url: typeof data.url === "string" ? data.url : "",
+              title: typeof data.title === "string" ? data.title : "",
+            },
+          }));
+        }
       } catch (cause) {
         result = {
           ok: false,
@@ -431,16 +458,24 @@ export default function App({
         // The panel may live in its own tab/window: target the page the user
         // is looking at (active web tab first, else the most recent web tab).
         const isWeb = (t: chrome.tabs.Tab) => /^https?:/i.test(t.url ?? "");
+        // A fresh new tab is a real target too: "Vikipedi'yi aç" from an
+        // empty tab must open the site there/next to it, not hijack another
+        // page the user left open.
+        const isBlank = (t: chrome.tabs.Tab) =>
+          /^(about:blank|(chrome|brave|edge):\/\/(newtab|new-tab-page)|chrome-search:\/\/local-ntp)/i.test(
+            t.url || t.pendingUrl || "about:blank",
+          );
         const [active] = await chrome.tabs.query({
           active: true,
           lastFocusedWindow: true,
         });
+        const all = (await chrome.tabs.query({})).sort(
+          (a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0),
+        );
         const current =
-          active && isWeb(active)
+          active && (isWeb(active) || isBlank(active))
             ? active
-            : (await chrome.tabs.query({}))
-                .filter(isWeb)
-                .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
+            : (all.find(isWeb) ?? all.find(isBlank));
         if (current?.id !== undefined)
           tab = {
             id: current.id,
@@ -487,6 +522,8 @@ export default function App({
   const recorderRef = useRef(recorder);
   recorderRef.current = recorder;
   const busy = activeId !== null || recorder.state !== "idle";
+  const petMood: PetMood = recorder.state === "recording" ? "listening"
+    : pending ? "waiting" : speaker.playing ? "speaking" : busy ? "working" : "idle";
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const cancel = () => {
@@ -569,6 +606,7 @@ export default function App({
     };
   }, []);
   useEffect(() => {
+    if (requests.length === 0) return;
     const node = scrollEnd.current;
     if (!node) return;
     const list = node.parentElement;
@@ -619,8 +657,8 @@ export default function App({
     <main className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">
-            <PolarisMark size={20} />
+          <span className="pet-header">
+            <PolarisPet size={52} mood={petMood} compact />
           </span>
           <div>
             <h1>Polaris</h1>
@@ -695,9 +733,8 @@ export default function App({
           />
         {requests.length === 0 && (
           <div className="welcome">
-            <div className="welcome-symbol" aria-hidden="true">
-              <span className="halo" />
-              <PolarisMark size={30} />
+            <div className="pet-welcome">
+              <PolarisPet size={142} mood={petMood} />
             </div>
             <p className="eyebrow">Yolunu bulan asistan</p>
             <h2>Ne yapmak istersin?</h2>
@@ -706,7 +743,7 @@ export default function App({
               gerekçesini görürsün.
             </p>
             <div className="suggestions">
-              {suggestions.map((item) => (
+              {(isDesktopMode() ? DESKTOP_SUGGESTIONS : suggestions).map((item) => (
                 <button
                   key={item.icon}
                   disabled={busy || !canSend}
@@ -796,6 +833,29 @@ export default function App({
         <div ref={scrollEnd} />
       </section>
       <footer className="composer-area">
+        {requests.length > 0 && (
+          <div className="pet-dock">
+            <PolarisPet size={88} mood={petMood} />
+            <div className="pet-dock-copy">
+              <strong>
+                {
+                  {
+                    idle: "Bir sonraki maceraya hazırım",
+                    working: "Bir saniye, üzerinde çalışıyorum…",
+                    listening: "Kulaklarım sende",
+                    speaking: "Anlatıyorum…",
+                    waiting: "Son söz sende",
+                  }[petMood]
+                }
+              </strong>
+              <p>
+                {petMood === "working"
+                  ? "Polaris yıldız tozu bırakıyor."
+                  : "Üzerine gel, seninle selamlaşsın."}
+              </p>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>

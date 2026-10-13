@@ -16,6 +16,7 @@ import {
   BROWSER_TOOLS,
   type BrowserToolName,
   type NavigateResult,
+  type OpenResult,
   type PingMessage,
   type Snapshot,
   type ToolMessage,
@@ -485,21 +486,19 @@ function normalizeNavigateUrl(raw: string): { url: string } | { error: string } 
   return { url };
 }
 
-async function navigate(
-  tabId: number,
-  args: Record<string, unknown>,
-): Promise<ToolResponse<NavigateResult>> {
+function readTargetUrl(args: Record<string, unknown>): { url: string } | { error: string } {
   const raw = args.url;
   if (typeof raw !== "string" || raw.trim() === "") {
-    return fail("url eksik, http(s) ile başlayan bir adres ver");
+    return { error: "url eksik, http(s) ile başlayan bir adres ver" };
   }
+  return normalizeNavigateUrl(raw);
+}
 
-  const normalized = normalizeNavigateUrl(raw);
-  if ("error" in normalized) {
-    return fail(normalized.error);
-  }
-  const url = normalized.url;
-
+/**
+ * Point an existing tab at an already-normalized URL and wait for the load.
+ * Shared by `browser.navigate` and `browser.open {new_tab:false}`.
+ */
+async function loadInTab(tabId: number, url: string): Promise<{ url: string; title: string }> {
   const previousUrl = (await chrome.tabs.get(tabId)).url;
   // Attach the watcher FIRST so the "loading" transition cannot be missed; the
   // old code slept 150 ms instead and resolved against the previous document.
@@ -515,8 +514,200 @@ async function navigate(
   // Report where we actually ended up: redirects are normal and the model
   // needs the final URL, not the requested one.
   const tab = await chrome.tabs.get(tabId);
-  return ok({ ok: true, url: tab.url ?? url, title: tab.title ?? "" });
+  return { url: tab.url ?? url, title: tab.title ?? "" };
 }
+
+/** Bring the tab (and its window) in front of the user, best effort. */
+async function focusTab(tab: chrome.tabs.Tab): Promise<void> {
+  try {
+    if (tab.id !== undefined && tab.active !== true) {
+      await chrome.tabs.update(tab.id, { active: true });
+    }
+  } catch {
+    /* Focus is cosmetic: never fail the tool over it. */
+  }
+  try {
+    if (tab.windowId !== undefined && chrome.windows?.update !== undefined) {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+  } catch {
+    /* Same: a window that refuses focus still has the page loaded. */
+  }
+}
+
+/**
+ * Open `url` in a NEW tab next to `opener` (or in the last focused normal
+ * window), focus it and wait until it has loaded. The caller makes the new tab
+ * the request's task tab.
+ */
+async function openInNewTab(
+  url: string,
+  opener: chrome.tabs.Tab | undefined,
+): Promise<ToolResponse<OpenResult>> {
+  const properties: chrome.tabs.CreateProperties = { url, active: true };
+  if (opener?.windowId !== undefined && opener.windowId !== chrome.windows?.WINDOW_ID_NONE) {
+    properties.windowId = opener.windowId;
+    if (typeof opener.index === "number") {
+      properties.index = opener.index + 1;
+    }
+    if (opener.id !== undefined) {
+      properties.openerTabId = opener.id;
+    }
+  }
+
+  let created: chrome.tabs.Tab;
+  try {
+    created = await chrome.tabs.create(properties);
+  } catch (error: unknown) {
+    // The opener's window may be a popup/devtools window or gone: retry plain.
+    if (properties.windowId === undefined) {
+      throw error;
+    }
+    created = await chrome.tabs.create({ url, active: true });
+  }
+  if (created.id === undefined) {
+    return fail("Yeni sekme açılamadı");
+  }
+
+  // A brand-new tab has no previous document: the first "complete" that is not
+  // the initial blank page is ours (the idle grace covers the rest).
+  const watcher = watchTabLoad(created.id, "", PAGE_LOAD_TIMEOUT_MS);
+  await focusTab(created);
+  await watcher.done;
+
+  const tab = await chrome.tabs.get(created.id);
+  return ok({
+    ok: true,
+    url: tab.url ?? url,
+    title: tab.title ?? "",
+    tab_id: created.id,
+    new_tab: true,
+  });
+}
+
+async function navigate(
+  tab: chrome.tabs.Tab,
+  args: Record<string, unknown>,
+): Promise<ToolResponse<NavigateResult>> {
+  const target = readTargetUrl(args);
+  if ("error" in target) {
+    return fail(target.error);
+  }
+  if (tab.id === undefined) {
+    return openInNewTab(target.url, undefined);
+  }
+
+  try {
+    const loaded = await loadInTab(tab.id, target.url);
+    return ok({ ok: true, ...loaded });
+  } catch (error: unknown) {
+    // A restricted page (brave://newtab, chrome://…) may refuse to be
+    // navigated by an extension. Opening the page next to it reaches the same
+    // goal instead of failing the user's request.
+    if (!isRestrictedUrl(tab.url)) {
+      throw error;
+    }
+    return openInNewTab(target.url, tab);
+  }
+}
+
+/** `browser.open {url, new_tab?=true}`. */
+async function open(
+  opener: chrome.tabs.Tab | undefined,
+  args: Record<string, unknown>,
+): Promise<ToolResponse<OpenResult>> {
+  const target = readTargetUrl(args);
+  if ("error" in target) {
+    return fail(target.error);
+  }
+  const newTab = !(args.new_tab === false || args.new_tab === "false" || args.new_tab === 0);
+  if (!newTab && opener?.id !== undefined) {
+    const result = await navigate(opener, args);
+    if (!result.ok || result.data === null) {
+      return result as ToolResponse<never>;
+    }
+    const tabId = result.data.tab_id ?? opener.id;
+    await focusTab({ ...opener, id: tabId } as chrome.tabs.Tab);
+    return ok({ ...result.data, tab_id: tabId, new_tab: result.data.new_tab ?? false });
+  }
+  return openInNewTab(target.url, opener);
+}
+
+// ---------------------------------------------------------------------------
+// Task tab tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * request_id → the tab that request is driving. `browser.open` (and a
+ * `navigate` that had to fall back to a new tab) moves a request to another
+ * tab; every later call of the SAME request must follow it, even though the
+ * panel keeps passing the tab it captured when the user hit enter.
+ */
+const taskTabs = new Map<string, number>();
+const MAX_TASK_TABS = 64;
+
+function rememberTaskTab(taskId: string | undefined, tabId: number | undefined): void {
+  if (taskId === undefined || taskId === "" || tabId === undefined) {
+    return;
+  }
+  taskTabs.delete(taskId);
+  taskTabs.set(taskId, tabId);
+  while (taskTabs.size > MAX_TASK_TABS) {
+    const oldest = taskTabs.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    taskTabs.delete(oldest);
+  }
+}
+
+/** The tab a request is currently driving, if it moved off its original tab. */
+export function taskTabOf(taskId: string): number | undefined {
+  return taskTabs.get(taskId);
+}
+
+/** Forget a finished request's tab (optional: the map is bounded anyway). */
+export function forgetTaskTab(taskId: string): void {
+  taskTabs.delete(taskId);
+}
+
+/** Test helper. */
+export function resetTaskTabs(): void {
+  taskTabs.clear();
+}
+
+async function preferredTabId(taskId: string | undefined, tabId: number | undefined): Promise<number | undefined> {
+  if (taskId === undefined) {
+    return tabId;
+  }
+  const tracked = taskTabs.get(taskId);
+  if (tracked === undefined) {
+    return tabId;
+  }
+  try {
+    const tab = await chrome.tabs.get(tracked);
+    if (tab.id !== undefined) {
+      return tab.id;
+    }
+  } catch {
+    /* The user closed the task tab: fall back to the request's own tab. */
+  }
+  taskTabs.delete(taskId);
+  return tabId;
+}
+
+/** New-tab / blank pages: the model should open a site, not read this one. */
+function isBlankPage(url: string | undefined): boolean {
+  const lower = (url ?? "").toLowerCase();
+  return (
+    lower === "" ||
+    lower === "about:blank" ||
+    /^(chrome|brave|edge):\/\/(newtab|new-tab-page)/.test(lower) ||
+    lower.startsWith("chrome-search://local-ntp")
+  );
+}
+
+const BLANK_PAGE_MESSAGE = `${RESTRICTED_MESSAGE}: sekme boş (yeni sekme). Bir site açmak için browser.open kullan`;
 
 /**
  * Execute a `browser.*` tool against a tab.
@@ -527,11 +718,14 @@ async function navigate(
  * @param name  Tool name, e.g. `"browser.click"`.
  * @param args  Tool arguments as defined in ORTAK BAĞLAM §7.
  * @param tabId Target tab; the active tab is used when omitted.
+ * @param taskId The request id: once `browser.open`/`navigate` moved this
+ *               request to another tab, later calls go there instead of `tabId`.
  */
 export async function executeBrowserTool(
   name: string,
   args: Record<string, unknown>,
   tabId?: number,
+  taskId?: string,
 ): Promise<ToolResponse> {
   if (!isBrowserTool(name)) {
     return fail(`Bilinmeyen tool: ${name}`);
@@ -539,19 +733,49 @@ export async function executeBrowserTool(
   const callArgs = asArgs(args);
 
   try {
-    const tab = await resolveTab(tabId);
+    const wanted = await preferredTabId(taskId, tabId);
+
+    // Opening never needs a usable current tab: with none at all the page
+    // still opens in the last focused window.
+    if (name === "browser.open") {
+      const opener = await resolveTab(wanted).catch(() => undefined);
+      const result = await withTimeout(open(opener, callArgs), NAVIGATE_TIMEOUT_MS, name);
+      if (result.ok && result.data !== null) {
+        rememberTaskTab(taskId, result.data.tab_id);
+      }
+      return result;
+    }
+
+    let tab: chrome.tabs.Tab;
+    try {
+      tab = await resolveTab(wanted);
+    } catch (error: unknown) {
+      if (name !== "browser.navigate") {
+        throw error;
+      }
+      // No drivable tab at all: navigating means "show me this page".
+      const result = await withTimeout(navigate({} as chrome.tabs.Tab, callArgs), NAVIGATE_TIMEOUT_MS, name);
+      if (result.ok && result.data !== null) {
+        rememberTaskTab(taskId, result.data.tab_id);
+      }
+      return result;
+    }
     if (tab.id === undefined) {
       return fail("Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste");
     }
     // Navigation is checked against its TARGET, not the current page: leaving a
     // brave://newtab is legitimate and is how most browser tasks start.
     if (name === "browser.navigate") {
-      return await withTimeout(navigate(tab.id, callArgs), NAVIGATE_TIMEOUT_MS, name);
+      const result = await withTimeout(navigate(tab, callArgs), NAVIGATE_TIMEOUT_MS, name);
+      if (result.ok && result.data !== null) {
+        rememberTaskTab(taskId, result.data.tab_id ?? tab.id);
+      }
+      return result;
     }
 
     // Everything else needs a content script, which these pages never run.
     if (isRestrictedUrl(tab.url)) {
-      return fail(RESTRICTED_MESSAGE);
+      return fail(isBlankPage(tab.url) ? BLANK_PAGE_MESSAGE : RESTRICTED_MESSAGE);
     }
 
     // The timeout does NOT cancel the content script: a `type`/`click` that ran

@@ -56,7 +56,7 @@ def test_get_shape(env):
     evren = data["presets"][0]
     assert evren["recommended"] == {"model": "gemma-4-31b", "fallback_model": "deepseek-v4.1-flash", "thinking": "off"}
     assert data["provider"] == "deepseek" and data["model"] == "deepseek-chat"
-    assert data["fallback_model"] is None and data["thinking"] == "on"
+    assert data["fallback_model"] is None and data["thinking"] == "off"  # LLM_THINKING unset -> off (default)
     assert data["api_key_set"] is True and data["api_key_hint"] == "…7890"
     assert data["brave_key_set"] is False and data["llm_configured"] is True
     assert "old-key-1234567890" not in str(data)

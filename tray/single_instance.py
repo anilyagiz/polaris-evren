@@ -115,3 +115,98 @@ def _stale(path: Path) -> bool:
     except (OSError, ValueError):
         return True
     return not _pid_alive(pid)
+
+
+# ---------------------------------------------------------------------------
+# "Show the window" signal: a second Polaris.exe launch asks the running one to
+# open its window, then exits.  Named auto-reset event (Windows only).
+# ---------------------------------------------------------------------------
+SHOW_EVENT_NAME = "Local\\PolarisTrayShowWindow"
+EVENT_MODIFY_STATE = 0x0002
+SYNCHRONIZE = 0x00100000
+WAIT_OBJECT_0 = 0
+
+
+def _event_k32() -> Any:  # pragma: no cover - Windows only
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateEventW.restype = wintypes.HANDLE
+    k32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    k32.OpenEventW.restype = wintypes.HANDLE
+    k32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    k32.SetEvent.argtypes = [wintypes.HANDLE]
+    k32.SetEvent.restype = wintypes.BOOL
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    return k32
+
+
+def signal_show(name: str = SHOW_EVENT_NAME, kernel32: Any = None) -> bool:
+    """Second instance: ask the running tray to show its window. True if delivered."""
+
+    if kernel32 is None and os.name != "nt":
+        return False
+    k32 = kernel32 or _event_k32()
+    handle = k32.OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, False, name)
+    if not handle:
+        return False
+    try:
+        return bool(k32.SetEvent(handle))
+    finally:
+        k32.CloseHandle(handle)
+
+
+class ShowSignalListener:
+    """First instance: run ``callback`` whenever another launch signals 'show'."""
+
+    def __init__(self, callback: Any, name: str = SHOW_EVENT_NAME, kernel32: Any = None,
+                 poll_ms: int = 500) -> None:
+        self.callback = callback
+        self.name = name
+        self._k32 = kernel32
+        self.poll_ms = poll_ms
+        self._handle: Any = None
+        self._stop = False
+        self._thread: Any = None
+
+    def start(self) -> bool:
+        if self._k32 is None:
+            if os.name != "nt":
+                return False
+            self._k32 = _event_k32()
+        self._handle = self._k32.CreateEventW(None, False, False, self.name)  # auto-reset
+        if not self._handle:
+            return False
+        import threading
+
+        self._thread = threading.Thread(target=self._run, name="polaris-show-signal", daemon=True)
+        self._thread.start()
+        return True
+
+    def wait_once(self) -> bool:
+        """One wait slice; returns True when the event fired (callback ran)."""
+
+        if self._k32.WaitForSingleObject(self._handle, self.poll_ms) == WAIT_OBJECT_0:
+            try:
+                self.callback()
+            except Exception:  # never let a bad callback end the listener
+                import logging
+
+                logging.getLogger("tray").exception("pencere gösterilemedi")
+            return True
+        return False
+
+    def _run(self) -> None:
+        while not self._stop:
+            self.wait_once()
+
+    def stop(self) -> None:
+        self._stop = True
+        if self._thread is not None:
+            self._thread.join(timeout=2 * self.poll_ms / 1000 + 0.5)
+        if self._handle:
+            self._k32.CloseHandle(self._handle)
+            self._handle = None

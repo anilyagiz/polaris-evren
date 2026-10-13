@@ -49,7 +49,10 @@ copy .env.example .env      # veya: scripts\setup.ps1 bunu otomatik yapar
 | `BRAVE_API_KEY` | `BSA...` | https://brave.com/search/api/ (ücretsiz katman: aylık 2.000 istek) |
 | `STT_MODEL` | `small` | Sözleşmeli varsayılan. Yavaş kalırsa `base`'e düşülebilir (**base daha hızlıdır**, bkz. §6). |
 | `STT_CPU_THREADS` | `8` | Boş bırakılırsa mantıksal çekirdek/2. Mantıksal çekirdek sayısını vermek CTranslate2'de oversubscription yapıp **yavaşlatır**. |
-| `TTS_VOICE` | `tr-TR-EmelNeural` | Hazır |
+| `TTS_ENGINE` | `ema` | `ema` (çevrimdışı EMA Lightning, varsayılan) \| `edge` (edge-tts). EMA/torch yoksa ya da hata verirse otomatik edge-tts. |
+| `TTS_SPEED` | `1.0` | EMA konuşma hızı, 0.25–4. |
+| `TTS_WARMUP` | *(boş)* | `1` → EMA modeli açılışta arka planda yüklenir (`STT_WARMUP=1` de tetikler). |
+| `TTS_VOICE` | `tr-TR-EmelNeural` | edge-tts sesi (yedek motor) |
 | `TIMEZONE` | `Europe/Istanbul` | Hazır |
 | `ASSISTANT_DB` | *(boş)* | İsteğe bağlı; testler için ayrı veritabanı yolu. Boşsa `backend/data/assistant.db`. |
 | `CUA_ENABLED` | `false` | Masaüstü demosu açıksa `true` |
@@ -127,6 +130,15 @@ python scripts\test_tools.py     # web.search, memory.*, reminders.* gerçek API
 | STT `base` — warm | < 3 sn | 0,93 sn |
 | TTS — ilk çağrı (edge-tts, ağ) | < 1,5 sn | **1,19 sn ✓** |
 | TTS — önbellekli | < 0,2 sn | 0,003–0,005 sn ✓ |
+| TTS EMA — model yükleme (indirilmiş, torch importu dahil) | — | ~20 sn |
+| TTS EMA — 95 karakter, warm (Ryzen 5 5600H, CPU) | < 1,5 sn | **~7–13 sn ✗** (CPU boşta değilken 26–38 sn) |
+
+**EMA Lightning (varsayılan TTS):** çevrimdışı, 24 kHz mono mp3 (64 kbps, PyAV/libmp3lame;
+kodlayıcı yoksa `audio/wav`). 95 karakter → 5,12 sn ses (~0,054 sn/karakter). CPU'da
+süre çoğunlukla 48 kHz dekoderde geçer ve gerçek zamandan yavaştır; GPU'da çok daha hızlıdır.
+Kütüphanenin CPU'da ilk `say()`'de yaptığı ~3 dk'lık batch ölçümü kodda atlanır
+(`_batch_size=1`). Hız kritikse `TTS_ENGINE=edge`. Önbellek anahtarı
+`motor|ses|hız|biçim|metin` olduğundan aynı cümle ikinci kez anında döner.
 | Uçtan uca: bas-konuş → sesli cevap | < 8 sn | *(panelle entegrasyonda ölçülecek)* |
 
 **Not:** `small` hedefi `cpu_threads=8` ile rahatça tutturuyor (~2,2 sn / 3,00 sn).
@@ -156,7 +168,8 @@ sırasında `--reload` kullanmayın.
 | `/stt` hedefi tutmuyor (5 sn ses > 3 sn) | Önce **`STT_CPU_THREADS=8`** olduğundan emin ol (mantıksal çekirdek sayısını vermek yavaşlatır). İlk çağrı model indiriyor olabilir; ikinciyi dene. Hâlâ yavaşsa `STT_MODEL=base` yap — **base small'dan ~2× hızlıdır** (0,93 sn vs ~2,2 sn), doğruluk biraz düşer. |
 | `/stt` 500 döndü | Dosya biçimi webm/opus olmalı (PyAV çözer, ffmpeg gerekmez). `python scripts\test_voice.py` ile ayrı ayrı doğrula. |
 | `/tts` **503** | edge-tts resmî olmayan istemci ve internet ister. İlk denemede başarısız olursa kod bir kez **yedek uç nokta** ile tekrarlar (bkz. `voice/tts.py::_apply_edge_workaround`). Varsayılan uç nokta bu makinede doğrulandı (1,19 sn). Yine 503 gelirse bağlantı/proxy kontrolü; panel otomatik olarak tarayıcı sesine geçer. |
-| TTS için ikinci bir motor yok mu? | **Bilinçli tercih.** `gTTS` denendi ama `click<8.2` istiyor; `huggingface-hub` (faster-whisper'ın model indiricisi) ise `click>=8.4.2` istiyor. İkisi aynı ortamda çalışmıyor ve whisper'ın model indirmesi bozuluyor. Sözleşmenin öngördüğü yedek yol panelin kendi tarayıcı sesidir. |
+| TTS motorları | Varsayılan **EMA Lightning** (çevrimdışı, `pip install ema-lightning`, torch CPU ~500 MB diskte). Yüklenemezse ya da sentez hata verirse istek **edge-tts**'e düşer (log'a bir kez yazılır); o da olmazsa 503 → panel tarayıcı sesi. `gTTS` bilinçli olarak yok (`click<8.2` çakışması, faster-whisper indiricisini bozar). |
+| `/tts` çok yavaş (EMA, CPU) | CPU'da 100 karakter ~7–13 sn sürebilir. `.env` içinde `TTS_ENGINE=edge` yapın ya da `TTS_WARMUP=1` ile ilk yüklemeyi açılışa alın. |
 | `memories`/`reminders` tablosu eski şemada kalmış | Kod ilk kullanımda **otomatik göç ettirir**: `id TEXT` → `id INTEGER`, eksikse `text_norm` eklenip doldurulur. Eski kayıtlar korunur, log'da `rebuilding the table with an integer id` görünür. |
 | `BRAVE_API_KEY ayarlanmamış` | `.env` içinde doldur ve **uvicorn'ı yeniden başlat**. |
 | `web.search` boş dönüyor | `.env` içinde `BRAVE_API_KEY` var mı, **uvicorn yeniden başlatıldı mı**? |

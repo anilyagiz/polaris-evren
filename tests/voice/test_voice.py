@@ -100,6 +100,7 @@ def test_clean_text():
 @pytest.fixture
 def tts_env(monkeypatch, tmp_path):
     monkeypatch.setattr(tts_mod, "TTS_CACHE_DIR", tmp_path)
+    monkeypatch.setenv("TTS_ENGINE", "edge")  # these tests cover the edge-tts path
     calls = []
 
     async def attempt(text, voice, target):
@@ -151,5 +152,6 @@ def test_tts_timeout_503(tts_env, monkeypatch):
 
 def test_tts_missing_lib_503(monkeypatch, tmp_path):
     monkeypatch.setattr(tts_mod, "TTS_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(tts_mod, "ema_importable", lambda: False)
     monkeypatch.setitem(sys.modules, "edge_tts", None)
     assert client.post("/tts", json={"text": "merhaba"}).status_code == 503

@@ -20,7 +20,12 @@ rem ---------- 1) Kurulum ----------
 if exist ".venv\Scripts\python.exe" goto :venv_ok
 echo [1/4] Ilk kurulum yapiliyor (Python paketleri, extension, whisper modeli).
 echo       Bu islem internet hizina gore 5-15 dakika surebilir...
-%PSX% -File "%ROOT%scripts\setup.ps1" -DownloadModels
+rem Kurulum sihirbaziyla gelen uv varsa sistem Python'u gerekmez (scripts\bootstrap.ps1).
+if exist "%ROOT%tools\uv\uv.exe" (
+  %PSX% -File "%ROOT%scripts\bootstrap.ps1" -DownloadModels
+) else (
+  %PSX% -File "%ROOT%scripts\setup.ps1" -DownloadModels
+)
 if errorlevel 1 goto :fail_setup
 :venv_ok
 echo [1/4] Python ortami hazir (.venv)

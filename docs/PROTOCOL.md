@@ -99,7 +99,9 @@ CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verili
 
 ### İstemci → Sunucu
 ```jsonc
-{ "type": "hello", "client": "extension", "version": "0.1" }
+{ "type": "hello", "client": "extension" | "desktop", "version": "0.1" }
+// "desktop" = Polaris masaüstü penceresi (/app/): browser.* araçları kapalı,
+// browser_task rotası sohbete düşürülür.
 { "type": "user_msg", "id": "r_ab12", "text": "…", "source": "text" | "voice",
   "tab": { "id": 123, "url": "…", "title": "…" } | null }
 { "type": "tool_result", "call_id": "c_9f", "ok": true, "data": { … } | null, "error": "…" | null }
@@ -172,6 +174,7 @@ Handler hata durumunda exception fırlatmak yerine `{"ok": false, "error": "…"
 | `browser.type` | `{ref, text, submit?: bool}` | `{ok}` | submit=true ise confirm | K2 |
 | `browser.scroll` | `{direction: "up"\|"down"}` | `{ok}` | safe | K2 |
 | `browser.navigate` | `{url}` | `{ok, url, title}` | safe | K2 |
+| `browser.open` | `{url, new_tab?: bool = true}` | `{ok, url, title, new_tab}` | safe | K2 |
 | `browser.read` | `{ref?}` | `{text}` (≤4000 karakter) | safe | K2 |
 | `browser.highlight` | `{ref}` | `{ok}` | safe | K2 |
 | `desktop.snapshot` | `{}` | `Snapshot` | safe | K4 |
@@ -186,6 +189,10 @@ Handler hata durumunda exception fırlatmak yerine `{"ok": false, "error": "…"
 | `reminders.list` | `{}` | `{items: [{id, text, due_iso}]}` | safe | K5 |
 
 \* Click'ler varsayılan olarak güvenli. Ama tıklanan öğenin adı riskli bir kalıba uyuyorsa (`gönder|satın|öde|sipariş|sil|onayla|submit|buy|pay|order|delete|send|confirm`) orchestrator'daki onay kapısı (K3) `need_confirm` gönderir.
+
+**Görev sekmesi (task tab).** Panel her `tool_call`'ı isteğin sekmesiyle (`tabId`) ve `request_id` ile köprüye verir. `browser.open` yeni bir sekme açar (yalnızca `http/https`; `navigate` ile aynı izin listesi), sekmeyi ve penceresini öne getirir, yüklenmesini bekler ve **o isteğin görev sekmesi** yapar: aynı `request_id`'nin sonraki bütün `browser.*` çağrıları bu sekmeye gider (`navigate` de görev sekmesini günceller). Aktif sekme kısıtlı/boş bir sayfaysa (`brave://newtab`, `chrome://…`, boş yeni sekme) `browser.navigate` o sekmeyi yönlendirir; bu mümkün değilse hata vermek yerine yeni sekmede açar. `new_tab: false` ile `browser.open`, `navigate` gibi davranır.
+
+**Görünür el (visible hand).** `click`/`type`/`scroll`/`highlight`/`read(ref)` sayfada çalışırken içerik betiği kapalı bir Shadow DOM katmanında (`pointer-events: none`, en üst `z-index`, sayfa düzenini etkilemez) altın renkli bir Polaris imleci gösterir: imleç hedef öğenin merkezine yumuşakça kayar (~300–450 ms), tıklamada dalga efekti yapar, `type`'ta metni harf harf yazar (en fazla ~1 s, sonra son değer React-güvenli biçimde atanır), öğeyi kısaca çerçeveler ve Türkçe kısa bir etiket gösterir ("Arama kutusuna yazıyorum"). `prefers-reduced-motion` açıksa animasyon yoktur. Araç argümanları değişmedi; isteğe bağlı `label` (metin) gelirse etiket olarak kullanılır, gelmezse etiket öğenin adından türetilir. Eylem başına ek gecikme ≤ ~1,5 s.
 
 ### Snapshot formatı (browser ve desktop aynı)
 ```jsonc

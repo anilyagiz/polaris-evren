@@ -86,7 +86,32 @@ class Paths:
 
     @property
     def extension_dist(self) -> Path:
+        # Release zip / setup exe ship the built extension as extension-dist\;
+        # a dev checkout builds it to extension\dist.
+        packaged = self.root / "extension-dist"
+        if (packaged / "manifest.json").is_file():
+            return packaged
         return self.root / "extension" / "dist"
+
+    @property
+    def data(self) -> Path:
+        return self.backend / "data"
+
+    @property
+    def tray_settings(self) -> Path:
+        """Desktop window position/size (tray/desktop_window.py)."""
+
+        return self.data / "tray-settings.json"
+
+    @property
+    def webview_data(self) -> Path:
+        """WebView2 profile of the desktop window (localStorage, mic permission)."""
+
+        return self.data / "webview"
+
+    @property
+    def app_icon(self) -> Path:
+        return self.data / "polaris.ico"
 
     @property
     def tray_doc(self) -> Path:

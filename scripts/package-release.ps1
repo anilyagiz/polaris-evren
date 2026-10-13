@@ -3,13 +3,16 @@
   Polaris surum paketi uretir:
     release\polaris-v<surum>.zip            (calistirilabilir proje: extension-dist + backend + scripts + ...)
     release\polaris-extension-v<surum>.zip  (yalnizca derlenmis extension, Brave'e "yukle" icin)
+    release\PolarisSetup-<surum>.exe        (Windows kurulum sihirbazi - kullaniciya onerilen yol; installer\)
   Surum extension\manifest.json "version" alanindan okunur.
 .PARAMETER SkipBuild
   extension\dist'i yeniden derlemez (var olani kullanir).
 .PARAMETER SkipTray
   tray\build.ps1 calistirilmaz (var olan tray\dist\Polaris.exe varsa yine eklenir).
+.PARAMETER NoInstaller
+  PolarisSetup-<surum>.exe uretilmez (Inno Setup gerektirmeden yalnizca zip'ler).
 #>
-param([switch]$SkipBuild, [switch]$SkipTray)
+param([switch]$SkipBuild, [switch]$SkipTray, [switch]$NoInstaller)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -102,10 +105,22 @@ $fullZip = Join-Path $releaseDir "$name.zip"
 $extZip = Join-Path $releaseDir "polaris-extension-v$version.zip"
 New-Zip $stage $fullZip $name
 New-Zip $dist $extZip ""
+
+# 5) kurulum sihirbazi (Inno Setup): release\PolarisSetup-<surum>.exe
+$setupExe = Join-Path $releaseDir "PolarisSetup-$version.exe"
+$outputs = @($fullZip, $extZip)
+if ($NoInstaller) {
+  Write-Host "  kurulum sihirbazi atlandi (-NoInstaller)" -ForegroundColor Yellow
+} elseif (-not (Test-Path (Join-Path $stage "Polaris.exe"))) {
+  Write-Host "  [!] Polaris.exe yok (tray derlenemedi); kurulum sihirbazi uretilemedi" -ForegroundColor Yellow
+} else {
+  & (Join-Path $Root "installer\build-installer.ps1") -StageDir $stage -Version $version -OutDir $releaseDir
+  $outputs += $setupExe
+}
 Remove-Item -Recurse -Force (Join-Path $releaseDir "_stage")
 
-foreach ($z in @($fullZip, $extZip)) {
+foreach ($z in $outputs) {
   $mb = [math]::Round((Get-Item $z).Length / 1MB, 2)
   Write-Host ("  {0}  ({1} MB)" -f $z, $mb) -ForegroundColor Green
 }
-Write-Host "Kullanici: zip'i acin -> $name\start-polaris.cmd'ye cift tiklayin." -ForegroundColor Cyan
+Write-Host "Kullanici: PolarisSetup-$version.exe'yi calistirin (ileri duzey: zip'i acin -> $name\start-polaris.cmd)." -ForegroundColor Cyan

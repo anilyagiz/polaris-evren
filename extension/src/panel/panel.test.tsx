@@ -19,6 +19,7 @@ vi.mock("../bridge/executeTool", () => ({
     data: { ok: true },
     error: null,
   })),
+  taskTabOf: vi.fn(() => undefined),
 }));
 
 beforeEach(() => {
@@ -346,7 +347,12 @@ describe("Live protocol wiring", () => {
       await Promise.resolve();
     });
     expect(executeBrowserTool).toHaveBeenCalledOnce();
-    expect(executeBrowserTool).toHaveBeenCalledWith("browser.read", {}, 123);
+    expect(executeBrowserTool).toHaveBeenCalledWith(
+      "browser.read",
+      {},
+      123,
+      user.id,
+    );
     expect(socket.sent.find((frame) => frame.type === "tool_result")).toEqual({
       type: "tool_result",
       call_id: "c_read",

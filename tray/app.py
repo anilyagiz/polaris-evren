@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 import time
@@ -26,6 +27,9 @@ log = logging.getLogger("tray")
 POLL_S = 5.0
 POLL_STARTING_S = 1.0
 READY_TOAST = "Polaris hazır — Brave'de paneli aç"
+READY_TOAST_WINDOW = "Polaris hazır — {hotkey} ile pencereyi aç"
+#: Autostart (Windows logon) starts in the tray only; shortcuts open the window.
+HIDDEN_FLAG = "--hidden"
 
 
 def setup_logging(paths: Paths) -> None:
@@ -161,8 +165,40 @@ class Controller:
 # ---------------------------------------------------------------------------
 # GUI
 # ---------------------------------------------------------------------------
+#: The running TrayApp (one per process); lets other windows (e.g. a mascot
+#: window created with webview.create_window before/after webview.start) reach
+#: the main Polaris window without importing TrayApp internals.
+_CURRENT: "TrayApp | None" = None
+
+
+def show_main_window() -> bool:
+    """Show (and focus) the main Polaris window. False when there is none (tray-only)."""
+
+    app = _CURRENT
+    if app is None or app.window is None:
+        return False
+    app.window.show()
+    return True
+
+
+def toggle_main_window() -> bool:
+    app = _CURRENT
+    if app is None or app.window is None:
+        return False
+    app.window.toggle()
+    return True
+
+
+def current_backend_url() -> str | None:
+    """Base URL of the backend the tray manages (``http://127.0.0.1:<port>``)."""
+
+    app = _CURRENT
+    return app.ctrl.address.base_url if app is not None else None
+
+
 class TrayApp:
     def __init__(self, paths: Paths) -> None:
+        global _CURRENT
         import pystray
 
         from .icons import make_icon
@@ -170,16 +206,22 @@ class TrayApp:
         self.pystray = pystray
         self.make_icon = make_icon
         self.paths = paths
-        self.autostart = Autostart(launcher_command(paths))
+        self.autostart = Autostart(f"{launcher_command(paths)} {HIDDEN_FLAG}")
         self.ctrl = Controller(paths, notify=self._toast)
         self._stop = threading.Event()
         self._wake = threading.Event()
+        self.window: Any = None  # DesktopWindow once pywebview + WebView2 are usable
+        self.hotkey: Any = None
+        self.show_listener: Any = None
         self.icon = pystray.Icon(APP_NAME, make_icon("grey"), "Polaris · başlıyor…", self._menu())
+        _CURRENT = self
 
     # -- menu -----------------------------------------------------------------
     def _menu(self) -> Any:
         Item, Menu = self.pystray.MenuItem, self.pystray.Menu
         return Menu(
+            # default=True: a left click on the tray icon runs this item.
+            Item("Polaris'i aç", self._safe(self.toggle_window), default=True),
             Item(lambda _i: self.ctrl.status.detail, None, enabled=False),
             Menu.SEPARATOR,
             Item("Sunucuyu yeniden başlat", self._safe(self.ctrl.restart)),
@@ -243,16 +285,39 @@ class TrayApp:
         self.autostart.toggle()
         self.icon.update_menu()
 
+    def show_window(self) -> None:
+        if self.window is None:
+            self.show_brave_steps()
+            return
+        self.window.show()
+
+    def toggle_window(self) -> None:
+        if self.window is None:
+            self.show_brave_steps()
+            return
+        self.window.toggle()
+
     def quit(self, *_args: Any) -> None:
         log.info("çıkış")
         self._stop.set()
         self._wake.set()
+        for helper in (self.hotkey, self.show_listener):
+            try:
+                if helper is not None:
+                    helper.stop()
+            except Exception:
+                log.exception("yardımcı durdurulamadı")
         try:
             self.ctrl.shutdown()
         finally:
             self.icon.stop()
+            if self.window is not None:
+                self.window.destroy()
 
     def _toast(self, text: str) -> None:
+        if text == READY_TOAST and self.window is not None:
+            label = self.hotkey.label if self.hotkey is not None and self.hotkey.label else "tepsi simgesi"
+            text = READY_TOAST_WINDOW.format(hotkey=label)
         try:
             self.icon.notify(text, APP_NAME)
         except Exception:  # pragma: no cover - notifications disabled
@@ -263,6 +328,8 @@ class TrayApp:
         self.icon.icon = self.make_icon(status.color)
         self.icon.title = status.tooltip
         self.icon.update_menu()
+        if self.window is not None and status.state in (RUNNING, NO_KEY):
+            self.window.set_backend(self.ctrl.address.base_url)
 
     def _poll_loop(self) -> None:
         last: Status | None = None
@@ -288,11 +355,86 @@ class TrayApp:
         self.ctrl.start()
         threading.Thread(target=self._poll_loop, daemon=True, name="polaris-poll").start()
 
-    def run(self) -> None:
+    # -- desktop window -----------------------------------------------------
+    def _make_window(self) -> Any:
+        """DesktopWindow, or None (tray-only) when pywebview/WebView2 is missing."""
+
+        from . import desktop_window as dw
+
+        if not dw.webview2_installed():
+            log.warning("WebView2 Runtime yok; pencere kapalı, yalnızca tepsi")
+            ui.message_box(dw.WEBVIEW2_MISSING, icon=ui.MB_ICONWARNING)
+            return None
         try:
-            self.icon.run(setup=self._setup)
+            import webview  # noqa: F401
+        except Exception as exc:
+            log.warning("pywebview yüklenemedi: %s", exc)
+            ui.message_box(dw.WEBVIEW_MISSING, icon=ui.MB_ICONWARNING)
+            return None
+        try:
+            if not self.paths.app_icon.is_file():
+                from .icons import write_ico
+
+                write_ico(self.paths.app_icon)
+        except Exception:
+            log.info("pencere ikonu yazılamadı")
+        debug = os.environ.get("POLARIS_WEBVIEW_DEBUG_PORT", "").strip()
+        window = dw.DesktopWindow(dw.SettingsStore(self.paths.tray_settings), self.paths.webview_data,
+                                  icon_path=self.paths.app_icon,
+                                  debug_port=int(debug) if debug.isdigit() else None)
+        window.create()
+        return window
+
+    def _start_window_helpers(self) -> None:
+        from .hotkey import HotkeyListener
+        from .single_instance import ShowSignalListener
+
+        self.hotkey = HotkeyListener(lambda: self.window and self.window.toggle())
+        if self.hotkey.start() is None:
+            log.warning("genel kısayol yok; pencere tepsi simgesinden açılır")
+        self.show_listener = ShowSignalListener(lambda: self.window and self.window.show())
+        if not self.show_listener.start():
+            log.info("ikinci başlatma sinyali dinlenemiyor")
+
+    def _window_started(self, show: bool) -> None:
+        window = self.window
+        if self.ctrl.status.state in (RUNNING, NO_KEY):
+            window.set_backend(self.ctrl.address.base_url)
+        if show:
+            window.show()
+        window.flush_pending_show()
+
+    def run(self, show_window: bool = True) -> None:
+        try:
+            self.window = self._make_window()
+        except Exception:
+            log.exception("pencere oluşturulamadı; yalnızca tepsi")
+            self.window = None
+        if self.window is None:
+            try:
+                self.icon.run(setup=self._setup)
+            finally:
+                self.ctrl.shutdown()
+            return
+        self._start_window_helpers()
+        # pywebview needs the main thread: the tray icon runs on its own thread.
+        self.icon.run_detached(setup=self._setup)
+        try:
+            self.window.run(on_started=lambda: self._window_started(show_window))
         finally:
+            self._stop.set()
+            self._wake.set()
+            for helper in (self.hotkey, self.show_listener):
+                try:
+                    if helper is not None:
+                        helper.stop()
+                except Exception:
+                    pass
             self.ctrl.shutdown()
+            try:
+                self.icon.stop()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -362,22 +504,29 @@ def main(argv: list[str] | None = None) -> int:
                         help="backend'i boş bir portta başlat, /health bekle, durdur, çık")
     parser.add_argument("--port", type=int, default=None, help="smoke için port (varsayılan: boş port)")
     parser.add_argument("--timeout", type=float, default=120.0, help="smoke zaman aşımı (sn)")
+    parser.add_argument(HIDDEN_FLAG, action="store_true",
+                        help="pencereyi açmadan yalnızca tepside başla (Windows açılışı)")
     args = parser.parse_args(argv)
 
     if args.smoke:
         return smoke(args.port, args.timeout)
 
-    from .single_instance import SingleInstance
+    from .single_instance import SingleInstance, signal_show
 
     paths = get_paths()
     setup_logging(paths)
     guard = SingleInstance(lock_dir=paths.logs)
     if not guard.acquire():
+        if args.hidden:
+            return 0
+        if signal_show():
+            log.info("Polaris zaten çalışıyor; penceresi gösterildi")
+            return 0
         ui.message_box("Polaris zaten çalışıyor — sistem tepsisindeki ★ simgesine bak.", wait=True)
         return 0
     try:
         log.info("tray başlıyor (kök %s)", paths.root)
-        TrayApp(paths).run()
+        TrayApp(paths).run(show_window=not args.hidden)
     except Exception as exc:
         log.exception("tray çöktü")
         ui.message_box(f"Polaris tepsi uygulaması beklenmedik şekilde kapandı:\n{exc}\n\n"

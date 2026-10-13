@@ -5,6 +5,7 @@ import {
   type ConnectionStatus,
   type ServerEvent,
 } from "./protocol";
+import { helloClient } from "./runtime";
 
 export interface Transport {
   send(event: ClientEvent): boolean;
@@ -33,7 +34,7 @@ export function connectSocket(
       socket?.send(
         JSON.stringify({
           type: "hello",
-          client: "extension",
+          client: helloClient(),
           version: "0.1",
         } satisfies ClientEvent),
       );

@@ -91,6 +91,12 @@ class FakePage:
         if name == "browser.navigate":
             self.url = str(args.get("url", self.url))
             return True, {"ok": True, "url": self.url, "title": self.title}, None
+        if name == "browser.open":
+            # A real extension opens a new tab and makes it the task tab; the
+            # fake page simply becomes that tab.
+            self.url = str(args.get("url", self.url))
+            self.executed.append((name, dict(args)))
+            return True, {"ok": True, "url": self.url, "title": self.title, "new_tab": args.get("new_tab", True), "tab_id": 2}, None
         return False, None, f"bilinmeyen araç: {name}"
 
     def executed_names(self) -> list[str]:

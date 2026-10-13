@@ -282,6 +282,28 @@ async function waitExchange(panel, index, timeout = STEP_TIMEOUT) {
   return { ex, answer, err, badges };
 }
 
+/**
+ * Wait for the visible Polaris hand (closed shadow host `#polaris-hand-host`)
+ * on `page` and screenshot it mid-action into out/hand-<name>.png. Resolves to
+ * true when the cursor was seen. Runs in the background next to a scenario.
+ */
+async function captureHand(pageOrFn, name, timeout = STEP_TIMEOUT) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const pages = typeof pageOrFn === "function" ? pageOrFn() : [pageOrFn];
+    for (const p of pages) {
+      const seen = await p.evaluate(() => Boolean(document.getElementById("polaris-hand-host"))).catch(() => false);
+      if (seen) {
+        await sleep(180); // let the glide get under way
+        await p.screenshot({ path: join(OUT, `hand-${name}.png`) }).catch((e) => log("hand screenshot failed", e.message));
+        return true;
+      }
+    }
+    await sleep(60);
+  }
+  return false;
+}
+
 async function shot(page, name) {
   try {
     await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: true });
@@ -342,6 +364,7 @@ const LIVE_SCENARIOS = [
   },
   {
     name: "web-search-keyless",
+    // (kept before the blank-tab scenario: that one leaves an extra tab open)
     url: "https://example.com/",
     prompt: "Web'de ara: Brave tarayıcısının kurucusu kim?",
     check: ({ answer, tools }) => {
@@ -349,6 +372,21 @@ const LIVE_SCENARIOS = [
       if (!/Eich/i.test(answer)) problems.push("answer lacks 'Brendan Eich'");
       if (!tools.includes("web.search") && !tools.includes("browser.navigate"))
         problems.push("neither web.search nor browser.navigate was used");
+      return problems;
+    },
+  },
+  {
+    // Starts from an EMPTY tab: the assistant must open the site itself.
+    name: "blank-tab-open-wikipedia",
+    url: "about:blank",
+    prompt: "Vikipedi'yi aç ve Ankara'nın nüfusunu söyle",
+    hand: true,
+    check: ({ answer, tools, openedUrls }) => {
+      const problems = [];
+      if (!tools.includes("browser.open")) problems.push(`browser.open was not used (tools: ${tools.join(",")})`);
+      if (!/ankara/i.test(answer)) problems.push("answer does not mention Ankara");
+      if (!/\d[\d.,\s]*\s*(milyon|million)|\d{1,3}([.,]\d{3}){2}/i.test(answer)) problems.push("answer has no population figure");
+      if (!openedUrls.some((u) => /wikipedia\.org/i.test(u))) problems.push(`no Wikipedia tab was opened (${openedUrls.join(", ")})`);
       return problems;
     },
   },
@@ -366,7 +404,13 @@ async function runLive(panel, page) {
       await page.bringToFront();
       const pageFacts = sc.facts ? await sc.facts(page).catch(() => ({})) : {};
       const index = await panel.locator("article.exchange").count();
+      const pagesBefore = new Set(context.pages());
       const started = Date.now();
+      // The visible hand: grab one mid-action screenshot on whichever page
+      // (the fixture or a tab the assistant opened) shows the cursor first.
+      const handSeen = sc.hand
+        ? captureHand(() => context.pages().filter((p) => p !== panel), `live-${sc.name}`, LIVE_TIMEOUT)
+        : Promise.resolve(null);
       await sendChat(panel, sc.prompt);
 
       // Safety: deny every confirmation on real sites, keep a record of it.
@@ -393,11 +437,20 @@ async function runLive(panel, page) {
       const seconds = Math.round((Date.now() - started) / 100) / 10;
       const tools = (await res.ex.locator(".trace-step code.tool-code").allInnerTexts()).map((c) => c.split("(")[0].trim());
       const steps = await res.ex.locator(".trace-step").count();
-      const finalUrl = page.url();
+      const opened = context.pages().filter((p) => !pagesBefore.has(p));
+      const openedUrls = opened.map((p) => p.url());
+      // Where the task ended: a tab the assistant opened (browser.open) wins.
+      const finalUrl = openedUrls.at(-1) ?? page.url();
       await shot(panel, `live-${sc.name}-panel`);
-      await page.screenshot({ path: join(OUT, `live-${sc.name}-page.png`) }).catch(() => undefined);
-      Object.assign(entry, { seconds, steps, tools, agents: [...new Set(res.badges)], answer: res.answer, error: res.err, denials, finalUrl, pageFacts });
-      const problems = res.err ? [`panel error: ${res.err}`] : res.answer ? sc.check({ answer: res.answer, tools, finalUrl, pageFacts }) : ["no final answer"];
+      await (opened.at(-1) ?? page).screenshot({ path: join(OUT, `live-${sc.name}-page.png`) }).catch(() => undefined);
+      const hand = await Promise.race([handSeen, sleep(100).then(() => null)]);
+      Object.assign(entry, { seconds, steps, tools, agents: [...new Set(res.badges)], answer: res.answer, error: res.err, denials, finalUrl, openedUrls, hand, pageFacts });
+      const problems = res.err ? [`panel error: ${res.err}`] : res.answer ? sc.check({ answer: res.answer, tools, finalUrl, openedUrls, pageFacts }) : ["no final answer"];
+      if (sc.hand && hand !== true) problems.push("visible hand cursor never appeared on the page");
+      // Tabs the assistant opened would become the "active tab" of the next
+      // scenario: close them.
+      for (const p of opened) await p.close().catch(() => undefined);
+      await page.bringToFront().catch(() => undefined);
       entry.ok = problems.length === 0;
       entry.problems = problems;
       record(`live ${sc.name} (${seconds}s, ${steps} steps)`, entry.ok, problems.join("; ") || res.answer.replace(/\s+/g, " ").slice(0, 140));
@@ -713,12 +766,16 @@ async function main() {
 
   // Settings UI reflects stored settings.
   await panel.getByLabel("Ayarlar").click();
-  const backendField = await panel.locator("#backend").inputValue();
+  // The server address lives under the "Gelişmiş" disclosure now.
+  if ((await panel.locator("#backend").count()) === 0) {
+    await panel.locator("button.disclosure").first().click().catch(() => undefined);
+  }
+  const backendField = await panel.locator("#backend").inputValue({ timeout: 5_000 });
   // The only switch left in Settings is "Sesli yanıt" (the mock mode was removed).
-  const speakChecked = await panel.locator(".setting-row input[type=checkbox]").first().isChecked();
+  const speakChecked = await panel.locator(".setting-row", { hasText: "Sesli yanıt" }).locator("input[type=checkbox]").first().isChecked();
   record("settings UI shows backend URL and stored speech setting", backendField === backendUrl && speakChecked === VOICE, `backend=${backendField} speak=${speakChecked}`);
   await shot(panel, "00-settings");
-  await panel.locator("dialog.modal").getByLabel("Kapat").click();
+  await panel.locator("dialog.modal").getByLabel("Kapat").first().click();
   await shot(panel, "01-panel-connected");
   if (!connected) throw new Error("panel not connected; aborting scenarios");
   if (LIVE) {
@@ -735,8 +792,11 @@ async function main() {
 
   // ---------------- scenario 1: shop search ----------------
   log("scenario 1: shop search");
+  const handShot = captureHand(fixture, "shop", STEP_TIMEOUT);
   await sendChat(panel, "Bu sitede mekanik klavye ara, ilk 3 fiyatı söyle");
   const s1 = await waitExchange(panel, 0);
+  const handSeen = await handShot;
+  record("hand: visible Polaris cursor shown on the page mid-action", handSeen, handSeen ? "out/hand-shop.png" : "no #polaris-hand-host");
   await shot(panel, "10-shop-panel");
   await shot(fixture, "11-shop-fixture");
   record("shop: final answer rendered", s1.answer.length > 0 && !s1.err, s1.err || s1.answer.slice(0, 120));

@@ -142,7 +142,7 @@ class LLMClient:
         if not base.startswith(("http://", "https://")):
             return "DEEPSEEK_BASE_URL geçersiz veya boş (http:// ya da https:// ile başlamalı); backend/.env dosyasını kontrol et."
         if not (self.model or "").strip():
-            return "LLM_MODEL tanımlı değil; backend/.env dosyasında modeli (örn. deepseek-chat) belirt."
+            return "LLM_MODEL tanımlı değil; backend/.env dosyasında modeli (örn. gemma-4-31b) belirt."
         return None
 
     def _sdk(self) -> AsyncOpenAI:
@@ -312,7 +312,8 @@ class LLMClient:
 def _with_thinking(kwargs: dict[str, Any], primary_model: str) -> dict[str, Any]:
     """LLM_THINKING=off disables hidden reasoning on the primary model (Gemma: ~5x faster)."""
 
-    if (os.environ.get("LLM_THINKING") or "").strip().lower() not in ("off", "0", "false", "no"):
+    # Default is off: Gemma (the default model) is ~5x faster without hidden reasoning.
+    if (os.environ.get("LLM_THINKING") or "off").strip().lower() not in ("off", "0", "false", "no"):
         return kwargs
     if kwargs.get("model") != primary_model:
         return kwargs

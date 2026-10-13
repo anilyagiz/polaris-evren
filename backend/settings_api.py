@@ -138,7 +138,7 @@ def _secret_hint(secret: str) -> str | None:
 def _current_payload() -> dict[str, Any]:
     s = get_settings()
     fallback = (os.environ.get("LLM_FALLBACK_MODEL") or "").strip() or None
-    thinking = "off" if (os.environ.get("LLM_THINKING") or "").strip().lower() in _OFF else "on"
+    thinking = "off" if (os.environ.get("LLM_THINKING") or "off").strip().lower() in _OFF else "on"
     return {
         "presets": PRESETS,
         "provider": _provider_for(s.deepseek_base_url),

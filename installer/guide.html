@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polaris Kurulum Rehberi</title>
+<!-- Kurulum sihirbazi polaris-path.js dosyasini kurulum aninda yazar: window.POLARIS_EXT_PATH = "<kok>\\extension-dist" -->
+<script src="polaris-path.js"></script>
+<style>
+  :root {
+    --navy: #0b1020; --navy-2: #1b2550; --gold: #f2c879; --gold-deep: #a8781f; --star: #b8862c;
+    --ivory: #fbf8f1; --bg: #f6f2e9; --surface: #fffdf8; --ink: #0b1020; --muted: #676d80;
+    --line: #e3ddcf; --success: #2f7a55; --code-bg: #f1ebdc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1020; --surface: #111833; --ink: #f3eee2; --muted: #a5abbd; --line: #252e52;
+      --ivory: #f3eee2; --code-bg: #1a2347;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    background: radial-gradient(1200px 400px at 80% -10%, #24306a 0%, transparent 60%), var(--navy);
+    color: #fbf8f1; padding: 44px 16px 56px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand svg { width: 44px; height: 44px; flex: none; }
+  .brand b { font-size: 28px; letter-spacing: .5px; }
+  .brand span { display: block; color: var(--gold); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; }
+  header p { color: #d9d4c6; max-width: 560px; margin: 18px 0 0; }
+  main { padding: 0 16px 48px; margin-top: -28px; }
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+  ol.steps > li {
+    counter-increment: s; position: relative; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px 20px 20px 72px; margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(11,16,32,.04);
+  }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: 20px; top: 18px; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--navy-2); color: var(--gold); font-weight: 700; display: grid; place-items: center;
+  }
+  h2 { margin: 2px 0 6px; font-size: 18px; }
+  li p { margin: 6px 0; color: var(--muted); }
+  li p strong, li p em { color: var(--ink); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  code, .path {
+    font-family: Consolas, "Cascadia Mono", monospace; background: var(--code-bg); border-radius: 8px;
+    padding: 6px 10px; font-size: 14px; color: var(--ink); overflow-wrap: anywhere;
+  }
+  .path { display: block; flex: 1 1 100%; }
+  button {
+    font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border: 0; border-radius: 10px;
+    padding: 9px 16px; background: var(--gold); color: var(--navy);
+  }
+  button:hover { filter: brightness(1.05); }
+  button:focus-visible { outline: 3px solid var(--gold-deep); outline-offset: 2px; }
+  button.done { background: var(--success); color: #fff; }
+  .tip { font-size: 14px; border-left: 3px solid var(--star); padding: 4px 0 4px 12px; margin-top: 10px; color: var(--muted); }
+  footer { color: var(--muted); font-size: 14px; text-align: center; padding: 8px 16px 40px; }
+  kbd { font-family: inherit; font-size: 13px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: var(--surface); }
+  @media (max-width: 520px) {
+    ol.steps > li { padding: 64px 16px 16px 16px; }
+    ol.steps > li::before { left: 16px; top: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><path fill="#f2c879" d="M32 2l5.6 22.4L60 32l-22.4 7.6L32 62l-5.6-22.4L4 32l22.4-7.6z"/><circle cx="32" cy="32" r="4" fill="#0b1020"/></svg>
+      <div><span>EVREN Asistan</span><b>Polaris kuruldu</b></div>
+    </div>
+    <p>Son bir adım kaldı: Polaris yan panelini Brave'e ekleyin. Beş kısa adım, yaklaşık iki dakika.</p>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <ol class="steps">
+      <li>
+        <h2>Uzantılar sayfasını açın</h2>
+        <p>Güvenlik gereği web sayfaları <em>brave://</em> adreslerini açamaz. Adresi kopyalayın, Brave'de yeni sekmenin adres çubuğuna yapıştırıp <kbd>Enter</kbd>'a basın.</p>
+        <div class="row"><code>brave://extensions</code><button data-copy="brave://extensions">Adresi kopyala</button></div>
+      </li>
+      <li>
+        <h2>Geliştirici modunu açın</h2>
+        <p>Sayfanın <strong>sağ üst köşesindeki</strong> <em>Geliştirici modu</em> anahtarını açık konuma getirin.</p>
+      </li>
+      <li>
+        <h2>Polaris klasörünü yükleyin</h2>
+        <p><em>Paketlenmemiş öğe yükle</em> (Load unpacked) düğmesine tıklayın. Açılan pencerede adres çubuğuna aşağıdaki yolu yapıştırıp <em>Klasör seç</em>'e basın.</p>
+        <div class="row"><span class="path" id="ext-path">…</span><button id="copy-path">Klasör yolunu kopyala</button></div>
+      </li>
+      <li>
+        <h2>Sabitleyin ve yan paneli açın</h2>
+        <p>Araç çubuğundaki yapboz simgesinden Polaris'i <strong>sabitleyin</strong> (raptiye). Sonra Polaris yıldızına tıklayın; yan panel açılır.</p>
+        <p class="tip">Polaris arka planda çalışır: saatin yanındaki yıldız simgesi açıksa panel kendiliğinden bağlanır.</p>
+      </li>
+      <li>
+        <h2>Yapay zeka anahtarını girin</h2>
+        <p>Panelde <strong>Ayarlar → Yapay zeka</strong> bölümüne API anahtarınızı yapıştırın ve <em>Kaydet</em>'e basın. Anahtar yalnızca bu bilgisayarda saklanır.</p>
+        <p class="tip">İlk bas-konuş'ta Brave mikrofon izni ister; <em>İzin ver</em>'i seçin.</p>
+      </li>
+    </ol>
+  </div>
+</main>
+<footer>Bir şey ters giderse: Başlat menüsü → Polaris → <strong>Polaris'i onar</strong>.</footer>
+<script>
+  (function () {
+    var p = window.POLARIS_EXT_PATH;
+    if (!p) {
+      // Yedek: rehber <kok>\guide\guide.html konumunda; eklenti <kok>\extension-dist.
+      try {
+        var f = decodeURIComponent(location.pathname).replace(/^\/+/, "").replace(/\//g, "\\");
+        p = f.replace(/\\guide\\[^\\]+$/i, "").replace(/\\installer\\[^\\]+$/i, "") + "\\extension-dist";
+      } catch (e) { p = "extension-dist"; }
+    }
+    document.getElementById("ext-path").textContent = p;
+    document.getElementById("copy-path").setAttribute("data-copy", p);
+
+    function copy(text, btn) {
+      var label = btn.textContent;
+      function ok() { btn.textContent = "Kopyalandı ✓"; btn.classList.add("done");
+        setTimeout(function () { btn.textContent = label; btn.classList.remove("done"); }, 1800); }
+      function fallback() {
+        var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); ok(); } catch (e) { prompt("Kopyalayın:", text); }
+        document.body.removeChild(ta);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback);
+      else fallback();
+    }
+    document.querySelectorAll("button[data-copy]").forEach(function (b) {
+      b.addEventListener("click", function () { copy(b.getAttribute("data-copy"), b); });
+    });
+  })();
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@ export const BROWSER_TOOLS = [
   "browser.type",
   "browser.scroll",
   "browser.navigate",
+  "browser.open",
   "browser.read",
   "browser.highlight",
 ] as const;
@@ -62,6 +63,16 @@ export interface NavigateResult {
   ok: true;
   url: string;
   title: string;
+  /** Tab that ended up showing the page (may be a new tab on fallback). */
+  tab_id?: number;
+  /** True when a new tab was opened instead of reusing the target tab. */
+  new_tab?: boolean;
+}
+
+/** `browser.open`: always reports which tab became the task tab. */
+export interface OpenResult extends NavigateResult {
+  tab_id: number;
+  new_tab: boolean;
 }
 
 export interface ReadResult {

@@ -111,7 +111,7 @@ def check_env() -> dict[str, str]:
         elif required:
             add(FAIL, f"  {key}", "bos - LLM calismaz")
         elif key == "LLM_MODEL":
-            add(WARN, f"  {key}", "bos - varsayilan (deepseek-chat) kullanilir")
+            add(WARN, f"  {key}", "bos - varsayilan (gemma-4-31b) kullanilir")
         else:
             add(WARN, f"  {key}", "bos - web.search hata doner")
     return env

@@ -33,13 +33,14 @@ RISKY_PATTERN = re.compile(
 #: Which tools the executor may see for each router decision.
 ROUTE_TOOLS: dict[str, tuple[str, ...]] = {
     "chat": (),
-    "web_search": ("web.search", "browser.read", "browser.navigate"),
+    "web_search": ("web.search", "browser.read", "browser.navigate", "browser.open"),
     "browser_task": (
         "browser.snapshot",
         "browser.click",
         "browser.type",
         "browser.scroll",
         "browser.navigate",
+        "browser.open",
         "browser.read",
         "browser.highlight",
         "web.search",

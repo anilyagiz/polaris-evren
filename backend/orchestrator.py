@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .agents.base import FinalAnswer, HistoryEntry, Plan
+from .agents.base import BROWSER_AVAILABLE, FinalAnswer, HistoryEntry, Plan
 from .bridge import BrowserBridge, SendFn, new_call_id
 from .config import get_settings
 from .llm import LLMClient, get_llm
@@ -53,6 +53,16 @@ RESPONDER_RESERVE_RATIO = 0.25
 REVISE_SIMILARITY = 0.85
 #: Prefix of an answer produced after the budget ran out.
 PARTIAL_PREFIX = "Süre doldu, eldeki sonuç:"
+#: `hello.client` of the Polaris desktop window: no browser extension behind it.
+DESKTOP_CLIENT = "desktop"
+#: Tool error for browser.* calls on a desktop-window connection.
+NO_BROWSER_ERROR = "Bu işlem tarayıcıda yapılır: Brave'de Polaris panelini aç."
+
+
+def without_browser_tools(tools: list[Tool]) -> list[Tool]:
+    """Desktop window: hide every browser.* tool from the executor."""
+
+    return [tool for tool in tools if not tool.name.startswith("browser.")]
 
 
 class BudgetExceeded(Exception):
@@ -258,6 +268,14 @@ class Orchestrator:
         #: Latest page snapshot of the running request; the trace emitter uses it
         #: to mask text typed into password/card fields (one request at a time).
         self._latest_snapshot: dict[str, Any] | None = None
+        #: `hello.client` of this connection ("extension", "desktop", "cli"...).
+        self.client_kind = ""
+
+    @property
+    def browser_available(self) -> bool:
+        """False for the desktop window: there is no extension to run browser.* tools."""
+
+        return self.client_kind != DESKTOP_CLIENT
 
     # -- lifecycle --------------------------------------------------------
     async def start(self) -> None:
@@ -371,6 +389,9 @@ class Orchestrator:
 
         if frame_type == "hello":
             logger.info("hello alındı: %s", {k: v for k, v in frame.items() if k != "type"})
+            self.client_kind = str(frame.get("client") or "").strip().lower()
+            if not self.browser_available:
+                logger.info("Masaüstü penceresi bağlandı: browser.* araçları kapalı")
             return
 
         if frame_type == "user_msg":
@@ -447,6 +468,8 @@ class Orchestrator:
         tab: dict[str, Any] | None,
     ) -> None:
         self._latest_snapshot = None
+        # Task-local: agents add "Tarayıcı erişimi yok" to their context block.
+        BROWSER_AVAILABLE.set(self.browser_available)
         emit = make_emitter(
             self._send, self.store, request_id, snapshot_provider=lambda: self._latest_snapshot
         )
@@ -492,6 +515,18 @@ class Orchestrator:
             )
             route = decision.route
             log.info("Route: %s (%.2f) — %s", route, decision.confidence, decision.why)
+            if route == "browser_task" and not self.browser_available:
+                # Deterministic: the desktop window has no browser to drive; the
+                # Responder explains (its context block carries the no-browser note).
+                route = "chat"
+                log.info("browser_task -> chat (masaüstü penceresi, tarayıcı yok)")
+                await self._emit_quiet(
+                    emit,
+                    "system",
+                    "Tarayıcı erişimi yok, sohbet ile yanıtlanıyor",
+                    "Masaüstü penceresinden tarayıcı kontrol edilemez; "
+                    "tarayıcı görevleri Brave'deki Polaris panelinden yapılır.",
+                )
 
             if route == "chat":
                 final = await _within(
@@ -704,6 +739,8 @@ class Orchestrator:
         """Executor turns until `finish`, a limit or the budget runs out."""
 
         tools = registry.list_for(route)
+        if not self.browser_available:
+            tools = without_browser_tools(tools)
         goal = plan.goal or text
         tool_calls = calls_used
         if snapshot is not None:
@@ -747,6 +784,19 @@ class Orchestrator:
                 break
 
             tool = registry.get(action.tool or "")
+            if tool is not None and not self.browser_available and tool.name.startswith("browser."):
+                tool_calls += 1
+                log.info("Masaüstü penceresi: %s çalıştırılmadı", tool.name)
+                history.append(
+                    HistoryEntry(
+                        tool=tool.name,
+                        args=action.args,
+                        ok=False,
+                        error=NO_BROWSER_ERROR,
+                        why=action.why,
+                    )
+                )
+                continue
             if tool is None:
                 # Counted as a turn: a model that keeps naming an unknown tool
                 # must hit `max_tool_calls` instead of looping to the deadline.
@@ -869,6 +919,22 @@ class Orchestrator:
             else:
                 error_text = str(result.get("error") or "bilinmeyen hata")
                 log.info("Araç hatası (%s): %s", tool.name, error_text)
+                # The page re-rendered (e.g. a search box swapped for a live
+                # typeahead after typing): drop the dead ref from the cached
+                # snapshot so the executor's stale-ref guard forces a fresh
+                # browser.snapshot instead of retrying the same ref forever.
+                if "ref bulunamadı" in error_text and isinstance(snapshot, dict):
+                    dead = str(action.args.get("ref"))
+                    elements = snapshot.get("elements")
+                    if isinstance(elements, list):
+                        snapshot = {
+                            **snapshot,
+                            "elements": [
+                                el for el in elements
+                                if not (isinstance(el, dict) and str(el.get("ref")) == dead)
+                            ],
+                        }
+                        self._latest_snapshot = snapshot
                 history.append(
                     HistoryEntry(
                         tool=tool.name,

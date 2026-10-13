@@ -85,6 +85,10 @@ class Settings:
     llm_model_explicit: bool = True
     #: Max /stt + /tts requests per client per minute (each path counted separately).
     voice_rate_limit_per_min: int = 30
+    #: TTS engine for POST /tts: "ema" (offline EMA Lightning, default) or "edge".
+    tts_engine: str = "ema"
+    #: EMA speaking speed, 0.25-4.
+    tts_speed: float = 1.0
 
     @property
     def llm_configured(self) -> bool:
@@ -110,11 +114,11 @@ def get_settings() -> Settings:
     db_path = Path(_env("DB_PATH", str(DEFAULT_DB_PATH)))
     return Settings(
         deepseek_api_key=_env("DEEPSEEK_API_KEY"),
-        deepseek_base_url=_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        deepseek_base_url=_env("DEEPSEEK_BASE_URL", "https://evren-llmapi.ssyz.org.tr/v1"),
         # DeepSeek's OpenAI-compatible chat model id (docs: deepseek-chat /
         # deepseek-reasoner). The task is function-calling heavy, so the
         # non-reasoning chat model is the default.
-        llm_model=_env("LLM_MODEL", "deepseek-chat"),
+        llm_model=_env("LLM_MODEL", "gemma-4-31b"),
         brave_api_key=_env("BRAVE_API_KEY"),
         stt_model=_env("STT_MODEL", "small"),
         tts_voice=_env("TTS_VOICE", "tr-TR-EmelNeural"),
@@ -124,16 +128,18 @@ def get_settings() -> Settings:
         db_path=db_path,
         host=_env("HOST", "127.0.0.1"),
         port=_env_int("PORT", 8765),
-        llm_timeout_s=_env_float("LLM_TIMEOUT_S", 30.0),
+        llm_timeout_s=_env_float("LLM_TIMEOUT_S", 60.0),
         llm_temperature_chat=_env_float("LLM_TEMPERATURE_CHAT", 0.6),
         tool_timeout_s=_env_float("TOOL_TIMEOUT_S", 20.0),
         confirm_timeout_s=_env_float("CONFIRM_TIMEOUT_S", 60.0),
-        max_tool_calls=_env_int("MAX_TOOL_CALLS", 12),
-        request_budget_s=_env_float("REQUEST_BUDGET_S", 240.0),
+        max_tool_calls=_env_int("MAX_TOOL_CALLS", 40),
+        request_budget_s=_env_float("REQUEST_BUDGET_S", 900.0),
         max_revisions=_env_int("MAX_REVISIONS", 2),
         reminder_poll_s=_env_float("REMINDER_POLL_S", 30.0),
         llm_model_explicit=bool(_env("LLM_MODEL")),
         voice_rate_limit_per_min=_env_int("VOICE_RATE_LIMIT_PER_MIN", 30),
+        tts_engine=_env("TTS_ENGINE", "ema").lower(),
+        tts_speed=_env_float("TTS_SPEED", 1.0),
     )
 
 

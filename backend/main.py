@@ -202,6 +202,11 @@ from .settings_api import router as settings_router  # noqa: E402
 
 app.include_router(settings_router)
 
+# Polaris desktop window (tray/pywebview) loads the built panel same-origin at /app/.
+from .desktop_app import register as register_desktop_app  # noqa: E402
+
+register_desktop_app(app)
+
 
 def _stt_ready() -> bool:
     """Is the Whisper model already loaded?  Never triggers a (slow) load."""
@@ -212,9 +217,14 @@ def _stt_ready() -> bool:
 
 def _tts_available() -> bool:
     try:
-        return importlib.util.find_spec("edge_tts") is not None
-    except (ImportError, ValueError):
-        return False
+        from .voice.tts import tts_available
+
+        return tts_available()
+    except Exception:  # voice module optional / broken install
+        try:
+            return importlib.util.find_spec("edge_tts") is not None
+        except (ImportError, ValueError):
+            return False
 
 
 @app.get("/health")

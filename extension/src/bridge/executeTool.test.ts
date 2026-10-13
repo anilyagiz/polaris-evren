@@ -346,7 +346,10 @@ describe("executeBrowserTool – kısıtlı sayfalar", () => {
       expect(result).toEqual({
         ok: false,
         data: null,
-        error: "Bu sayfada asistan çalışamıyor",
+        // Blank/new-tab pages add a hint: "open a site with browser.open".
+        error: url === "about:blank"
+          ? "Bu sayfada asistan çalışamıyor: sekme boş (yeni sekme). Bir site açmak için browser.open kullan"
+          : "Bu sayfada asistan çalışamıyor",
       });
       expect(fake.sendMessage).not.toHaveBeenCalled();
     });

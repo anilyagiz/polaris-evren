@@ -87,6 +87,7 @@ describe("sözleşme sabitleri", () => {
       "browser.type",
       "browser.scroll",
       "browser.navigate",
+      "browser.open",
       "browser.read",
       "browser.highlight",
     ]);

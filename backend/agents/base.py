@@ -8,6 +8,7 @@ declared in its own module.  The orchestrator only sees these models.
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -19,6 +20,15 @@ from ..llm import LLMClient, Usage
 from ..trace import EmitFn, TraceStep, make_step
 
 logger = logging.getLogger(__name__)
+
+#: False while serving the Polaris desktop window (no browser extension on the
+#: other end of the socket).  Set per request task by the orchestrator.
+BROWSER_AVAILABLE: ContextVar[bool] = ContextVar("polaris_browser_available", default=True)
+NO_BROWSER_NOTE = (
+    "- Tarayıcı erişimi yok (masaüstü penceresi): browser.* araçları ve sekme/sayfa işlemleri "
+    "kullanılamaz. Tarayıcıda yapılması gereken bir iş istenirse kullanıcıya bunun için "
+    "Brave'de Polaris panelini açmasını söyle; sohbet, web araması, hafıza ve hatırlatmalar çalışır."
+)
 
 RouteName = Literal["chat", "web_search", "browser_task", "desktop_task", "personal"]
 MAX_PLAN_STEPS = 5
@@ -207,6 +217,8 @@ def build_context_block(
         lines.append("- İlgili hafıza kaydı yok.")
     if not settings.cua_enabled:
         lines.append("- Masaüstü (desktop_*) yetenekleri bu oturumda KAPALI.")
+    if not BROWSER_AVAILABLE.get():
+        lines.append(NO_BROWSER_NOTE)
     return "\n".join(lines)
 
 

@@ -14,5 +14,7 @@ pillow>=10                     # /shots ve CUA ekran görüntüsü işaretleme
 # Ses (ağır: ilk STT çağrısında model indirir)
 faster-whisper>=1.0.3,<2
 av>=12,<19                     # webm/opus çözümü (ffmpeg gerekmez)
-edge-tts>=6.1.12,<8            # internet gerekir; hata -> 503
+ema-lightning>=1.1.2,<2        # varsayılan TTS: çevrimdışı Türkçe model (~34 MB, ilk çağrıda iner)
+                               # torch'u çeker; Windows'ta PyPI torch zaten CPU tekerleği (diskte ~500 MB)
+edge-tts>=6.1.12,<8            # yedek TTS (TTS_ENGINE=edge ya da EMA yoksa); internet gerekir
 # NOT: gTTS bilerek yok (click sürüm çakışması: huggingface-hub ile).

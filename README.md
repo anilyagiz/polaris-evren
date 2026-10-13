@@ -33,39 +33,38 @@ Mimari ayrıntılar: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Donmuş pro
 
 ---
 
-## 5 dakikada başla
+## Kurulum (Windows)
 
-**Gereksinimler** (bir kez kurulur):
+**Önerilen yol: kurulum sihirbazı.** Python, Node.js veya yönetici izni **gerekmez**.
 
-| Yazılım | Sürüm | Not |
-|---|---|---|
-| Windows 10/11 | — | Betikler PowerShell 5.1 ile çalışır |
-| [Python](https://www.python.org/downloads/) | **3.12** (3.11–3.13) | Kurarken "Add python.exe to PATH". 3.14 **kullanmayın** (faster-whisper) |
-| [Node.js](https://nodejs.org) | 18+ (22 önerilir) | npm onunla gelir. pnpm **gerekmez** |
-| [Brave](https://brave.com) | güncel | Yan panel + mikrofon |
-| Docker Desktop + WSL2 | isteğe bağlı | Yalnızca masaüstü (CUA) demosu |
+1. [GitHub Releases](https://github.com/anilyagiz/polaris-evren/releases) sayfasından
+   **`PolarisSetup-<sürüm>.exe`** dosyasını indirip çalıştırın (zip'leri değil).
+   - SmartScreen "Windows bilgisayarınızı korudu" derse: **Ek bilgi → Yine de çalıştır**.
+2. Sihirbaz (Türkçe): klasör (`%LOCALAPPDATA%\Programs\Polaris`) → seçenekler
+   (*Masaüstü kısayolu*, *Ses modelini şimdi indir ~460 MB*, *Windows açılışında başlat*)
+   → Brave yoksa *Brave tarayıcısını da kur* → **Kur**.
+3. Kurulum, Polaris klasörüne kendi **Python 3.12**'sini indirir (uv ile; sistem Python'una
+   dokunmaz), paketleri kurar ve ilerlemeyi sihirbazda gösterir (internet hızına göre 3–10 dk).
+   İnternet kesilirse: *Yeniden dene* ya da sonra **Başlat → Polaris → Polaris'i onar**.
+4. Bitişte **Polaris başlar** (saatin yanında yıldız simgesi) ve **Brave kurulum rehberi** açılır:
+   `brave://extensions` → Geliştirici modu → *Paketlenmemiş öğe yükle* → rehberdeki
+   *Klasör yolunu kopyala* → sabitle → **Ayarlar → Yapay zeka**'ya API anahtarını yapıştır.
+5. Panelde yaz ya da bas-konuş: *"Bu sayfayı özetle"*.
 
-**Başlat:**
+Kaldırma: **Ayarlar → Uygulamalar → Polaris** ya da Başlat → Polaris → *Polaris'i kaldır*
+(`.venv`, Python, kısayollar ve açılış kaydı silinir; konuşma geçmişini saklamak isteyip
+istemediğiniz sorulur). Ayrıntılar ve sessiz kurulum: [`docs/INSTALL.md`](docs/INSTALL.md).
 
-1. Repo kökündeki **`start-polaris.cmd`** dosyasına çift tıkla.
-   - İlk seferde kurulum yapar (`.venv`, Python paketleri, extension, whisper modeli ~460 MB): 5–15 dk.
-   - `backend\.env` yoksa oluşturup **Not Defteri'nde açar** → `DEEPSEEK_API_KEY` (zorunlu) ve
-     `BRAVE_API_KEY` (web araması) yaz, **kaydet, Not Defteri'ni kapat**; kurulum devam eder.
-   - Extension'ı derler, backend'i başlatır ve `/health` yanıt verene kadar bekler.
-   - Backend **sistem tepsisinde** çalışır: saatin yanındaki **Polaris yıldızı** simgesi
-     (sağ tık → durum / çıkış). Tepsi uygulaması kullanılamıyorsa ayrı bir "Polaris Backend" konsol
-     penceresi açılır (`start-polaris.cmd --console` ile konsol modu zorlanır).
-2. Brave'e yükle (pencere aynı adımları ve klasör yolunu yazar; yol panoya kopyalanır):
-   1. Adres çubuğuna `brave://extensions`
-   2. Sağ üstte **Geliştirici modu**nu aç
-   3. **Paketlenmemiş uzantıyı yükle** → `extension\dist` klasörünü seç
-      (sürüm zip'inde: `extension-dist`)
-   4. Polaris simgesine tıkla → yan panel açılır
-   5. İlk **Bas-konuş**'ta mikrofon iznini ver
-   6. Panel **Ayarlar → Backend adresi**: `http://localhost:8765`
-3. Panelde yaz ya da bas-konuş: *"Bu sayfayı özetle"*.
+### İleri düzey: zip ile kurulum
 
-Doğrulama: <http://127.0.0.1:8765/health> → `{"ok": true, ...}` · Tam kontrol listesi:
+`polaris-v<sürüm>.zip`'i açıp **`start-polaris.cmd`**'ye çift tıklayın. Bu yol sistemde
+**Python 3.12** (3.11–3.13; 3.14 değil, "Add python.exe to PATH") ister; ilk seferde `.venv`,
+paketler ve whisper modeli kurulur (5–15 dk), backend tepsi uygulamasıyla başlar ve Brave
+adımları pencerede yazılır (eklenti klasörü: `extension-dist`). `start-polaris.cmd --console`
+konsol modunu zorlar. Docker Desktop + WSL2 yalnızca isteğe bağlı masaüstü (CUA) demosu içindir.
+
+Doğrulama: <http://127.0.0.1:8765/health> → `{"ok": true, "service": "polaris", ...}`
+(8765 doluysa Polaris 8766+ portuna geçer; panel kendisi bulur) · Tam kontrol listesi:
 `.venv\Scripts\python scripts\doctor.py`
 
 ### Elle kurulum (geliştirici)
@@ -93,7 +92,8 @@ Aynı adımlar her push/PR'da GitHub Actions'ta çalışır (`.github/workflows/
 ### Sürüm paketi
 
 ```powershell
-.\scripts\package-release.ps1
+.\scripts\package-release.ps1              # -SkipBuild, -SkipTray, -NoInstaller
+# -> release\PolarisSetup-<sürüm>.exe        kurulum sihirbazı (Inno Setup 6; installer\, docs\INSTALL.md)
 # -> release\polaris-v<sürüm>.zip            extension-dist, backend, scripts, shared, docs, demo, tray,
 #                                            README, CHANGELOG, start-polaris.cmd, Polaris.exe (varsa)
 # -> release\polaris-extension-v<sürüm>.zip  yalnızca derlenmiş extension
@@ -112,15 +112,18 @@ ekleme (`.env` .gitignore'dadır). `.env` değişince backend'i yeniden başlat.
 | Değişken | Varsayılan | Açıklama |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | — | **Zorunlu.** LLM anahtarı |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI uyumlu başka bir ağ geçidi için değiştir |
-| `LLM_MODEL` | `deepseek-chat` | Model adı. EVREN geçidinde önerilen: `gemma-4-31b` (hızlı) |
+| `DEEPSEEK_BASE_URL` | `https://evren-llmapi.ssyz.org.tr/v1` | EVREN ağ geçidi; başka bir OpenAI uyumlu geçit için değiştir |
+| `LLM_MODEL` | `gemma-4-31b` | Model adı (Gemma 4 31B, hızlı). Panelden Ayarlar → Yapay zeka ile değiştirilebilir |
 | `LLM_FALLBACK_MODEL` | boş | Birincil model hata verirse (zaman aşımı, 5xx, model yok) düşülecek model, örn. `deepseek-v4.1-flash` |
-| `LLM_THINKING` | açık | `off`: birincil modelin gizli "düşünme" adımını kapatır (Gemma'da adım ~1 sn, ~5 kat hızlı) |
+| `LLM_THINKING` | `off` | Gizli "düşünme" adımı. `off` (varsayılan) Gemma'da adımı ~1 sn yapar; `on` ile açılır |
 | `BRAVE_API_KEY` | boş | `web.search` için ([brave.com/search/api](https://brave.com/search/api/)); boşsa anahtarsız DuckDuckGo yedeği kullanılır |
 | `WEB_SEARCH_FALLBACK` | `duckduckgo` | `off` yapılırsa anahtarsız yedek kapanır |
 | `STT_MODEL` | `small` | `small` (~460 MB) \| `base` (~140 MB, ~2× hızlı, Türkçede daha zayıf) |
 | `STT_CPU_THREADS` | mantıksal çekirdek/2 | Çekirdek sayısının tamamını verme (yavaşlatır) |
-| `TTS_VOICE` | `tr-TR-EmelNeural` | edge-tts sesi |
+| `TTS_ENGINE` | `ema` | `ema`: çevrimdışı Türkçe [EMA Lightning](https://huggingface.co/canberkkkkkk/ema-lightning) (Apache-2.0, ~34 MB model ilk çağrıda iner; `torch` CPU kurulumu diskte ~500 MB ekler). `edge`: edge-tts (internet). EMA yüklenemezse otomatik edge-tts'e düşer |
+| `TTS_SPEED` | `1.0` | EMA konuşma hızı (0.25–4) |
+| `TTS_WARMUP` | boş | `1`: EMA modeli açılışta arka planda yüklenir (`STT_WARMUP=1` de tetikler) |
+| `TTS_VOICE` | `tr-TR-EmelNeural` | edge-tts sesi (yedek motor) |
 | `TIMEZONE` | `Europe/Istanbul` | Hatırlatıcılar için |
 | `HOST` / `PORT` | `127.0.0.1` / `8765` | Backend adresi. `PORT` ortam değişkeni `.env`'i ezer |
 | `CUA_ENABLED` | `false` | Masaüstü araçlarını açar (Docker gerekir) |

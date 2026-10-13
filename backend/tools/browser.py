@@ -10,6 +10,7 @@ becomes ``{"ok": False, "error": ...}``.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from ..config import get_settings
@@ -119,6 +120,47 @@ async def _navigate(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     }
 
 
+#: Schemes `browser.open` may hand to the extension.  A bare host
+#: ("tr.wikipedia.org") is fine too: the extension prefixes https://.
+_OPEN_SCHEME = re.compile(r"^([a-z][a-z0-9+.-]*):(?!\d)", re.IGNORECASE)
+
+
+def _open_url_error(raw: Any) -> str | None:
+    """Same allow-list as `browser.navigate` (http/https only), checked early.
+
+    The extension enforces it again (`normalizeNavigateUrl`); this copy only
+    saves a bridge round-trip and gives the model a clear Turkish reason.
+    """
+
+    if not isinstance(raw, str) or not raw.strip():
+        return "url eksik, http(s) ile başlayan bir adres ver"
+    match = _OPEN_SCHEME.match(raw.strip())
+    if match and match.group(1).lower() not in ("http", "https"):
+        return f'"{match.group(1).lower()}:" adresleri açılamaz, yalnızca http/https'
+    return None
+
+
+async def _open(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    error = _open_url_error(args.get("url"))
+    if error is not None:
+        return {"ok": False, "error": error}
+    payload: dict[str, Any] = {"url": str(args["url"]).strip()}
+    # Default is a NEW tab; only an explicit false keeps the current tab.
+    payload["new_tab"] = True if args.get("new_tab") is None else is_truthy(args.get("new_tab"))
+    result = await _bridge_call("browser.open", payload, ctx)
+    if not result["ok"]:
+        return _failure(result)
+    data = result["data"] if isinstance(result["data"], dict) else {}
+    return {
+        "ok": True,
+        "data": {
+            "url": str(data.get("url") or payload["url"]),
+            "title": str(data.get("title") or ""),
+            "new_tab": bool(data.get("new_tab", payload["new_tab"])),
+        },
+    }
+
+
 async def _read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     result = await _bridge_call("browser.read", args, ctx)
     if not result["ok"]:
@@ -161,7 +203,7 @@ _REF = {"type": "integer", "description": "Snapshot'taki öğe referans numaras�
 
 
 def _build_tools() -> list[Tool]:
-    """Fresh Tool objects for the seven `browser.*` tools."""
+    """Fresh Tool objects for the eight `browser.*` tools."""
 
     return [
         Tool(
@@ -235,6 +277,27 @@ def _build_tools() -> list[Tool]:
             handler=_navigate,
         ),
         Tool(
+            name="browser.open",
+            description=(
+                "Verilen adresi YENİ bir sekmede açar, sekmeyi öne getirir ve yüklenmesini "
+                "bekler; sonraki tüm browser.* çağrıları bu sekmede çalışır. Kullanıcı bir "
+                "site istiyorsa ('Vikipedi'yi aç') veya aktif sekme boşsa/yeni sekmeyse bunu "
+                "kullan. new_tab=false verirsen mevcut görev sekmesinde açar."
+            ),
+            parameters=_object_schema(
+                {
+                    "url": {"type": "string", "description": "Açılacak tam adres (https://...)."},
+                    "new_tab": {
+                        "type": "boolean",
+                        "description": "Varsayılan true: yeni sekmede aç. false: mevcut sekmede aç.",
+                    },
+                },
+                ["url"],
+            ),
+            risk="safe",
+            handler=_open,
+        ),
+        Tool(
             name="browser.read",
             description=(
                 "Sayfanın metnini okur; ref verilirse yalnızca o öğenin metnini getirir. İçeriği "
@@ -261,7 +324,7 @@ def _build_tools() -> list[Tool]:
 
 
 def register_browser_tools() -> list[Tool]:
-    """Register the seven `browser.*` tools; safe to call more than once.
+    """Register the eight `browser.*` tools; safe to call more than once.
 
     Already registered tools are left untouched, so importing this module and
     calling the function explicitly never duplicates or replaces a handler.

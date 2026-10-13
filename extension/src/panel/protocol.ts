@@ -78,7 +78,7 @@ export type Citation = Extract<
 >["citations"][number];
 export type TabContext = { id: number; url: string; title: string };
 export type ClientEvent =
-  | { type: "hello"; client: "extension"; version: "0.1" }
+  | { type: "hello"; client: "extension" | "desktop"; version: "0.1" }
   | {
       type: "user_msg";
       id: string;

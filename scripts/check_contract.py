@@ -28,7 +28,7 @@ FIXTURE_PATH = PROJECT_ROOT / "shared" / "fixtures" / "session_example.jsonl"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-BROWSER_TOOL_COUNT = 7
+BROWSER_TOOL_COUNT = 8
 BROWSER_TOOLS = frozenset(
     {
         "browser.snapshot",
@@ -36,6 +36,7 @@ BROWSER_TOOLS = frozenset(
         "browser.type",
         "browser.scroll",
         "browser.navigate",
+        "browser.open",
         "browser.read",
         "browser.highlight",
     }
@@ -596,7 +597,7 @@ def check_main_routes() -> Result:
 # Çalıştırma
 # ---------------------------------------------------------------------------
 CHECKS: tuple[tuple[str, Callable[[], Result]], ...] = (
-    ("browser.* tool kaydı (7 adet)", check_browser_registration),
+    ("browser.* tool kaydı (8 adet)", check_browser_registration),
     ("tool kayıt sözleşmesi (namespace, şema, risk, Türkçe açıklama)", check_tool_records),
     ("llm_name / from_llm_name round-trip", check_name_roundtrip),
     ("inject_why: kopya güvenliği + zorunlu 'why'", check_inject_why),

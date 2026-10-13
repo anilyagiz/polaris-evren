@@ -1,4 +1,5 @@
 import { normalizeBackend } from "./protocol";
+import { desktopBackend } from "./runtime";
 
 export interface Settings {
   backend: string;
@@ -12,6 +13,13 @@ export const defaultSettings: Settings = {
 const key = "polaris-panel-settings";
 
 export async function loadSettings(): Promise<Settings> {
+  const loaded = await loadStoredSettings();
+  // Desktop window: the backend is whoever served this page (same origin).
+  const own = desktopBackend();
+  return own ? { ...loaded, backend: own } : loaded;
+}
+
+async function loadStoredSettings(): Promise<Settings> {
   try {
     const stored: unknown =
       typeof chrome !== "undefined" && chrome.storage?.local

@@ -105,7 +105,7 @@ if (-not (Test-Path $envFile)) {
 } else { Ok "backend\.env zaten var (degistirilmedi)" }
 Write-Host "  Doldurmaniz gereken degerler (backend\.env):" -ForegroundColor White
 Write-Host "    DEEPSEEK_API_KEY  -> LLM anahtari (zorunlu)"
-Write-Host "    LLM_MODEL         -> model adi (varsayilan deepseek-chat)"
+Write-Host "    LLM_MODEL         -> model adi (varsayilan gemma-4-31b)"
 Write-Host "    DEEPSEEK_BASE_URL -> farkli bir OpenAI-uyumlu gecit kullaniyorsaniz"
 Write-Host "    BRAVE_API_KEY     -> web.search icin (https://brave.com/search/api/)"
 Write-Host "  Anahtarlari asla git'e eklemeyin; .env .gitignore'dadir."

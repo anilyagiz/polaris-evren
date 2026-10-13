@@ -36,3 +36,7 @@ extension/pnpm-lock.yaml
 # tray derleme ciktilari
 tray/dist/
 tray/build/
+
+# kurulum sihirbazi derleme ciktilari (installer\build-installer.ps1)
+installer/build/
+installer/.cache/

@@ -97,5 +97,5 @@ def ensure_env_file(env_file: Path, example: Path) -> bool:
     if example.exists():
         shutil.copyfile(example, env_file)
     else:
-        env_file.write_text("DEEPSEEK_API_KEY=\nLLM_MODEL=deepseek-chat\nPORT=8765\n", encoding="utf-8")
+        env_file.write_text("DEEPSEEK_API_KEY=\nLLM_MODEL=gemma-4-31b\nPORT=8765\n", encoding="utf-8")
     return True

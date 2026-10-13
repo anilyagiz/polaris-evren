@@ -2,3 +2,4 @@
 # Polaris.exe derlemek icin ayrica: pyinstaller (tray\build.ps1 kendisi kurar)
 pystray>=0.19.5
 Pillow>=10.0
+pywebview>=5.3  # Polaris penceresi (WebView2; Windows icin pythonnet ile gelir)
