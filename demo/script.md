@@ -8,11 +8,13 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
 ## 0. Demo öncesi kontrol listesi (5 dk önce)
 
 - [ ] `uvicorn backend.main:app --port 8000` çalışıyor → `http://localhost:8000/health` → `{"ok": true}`
-- [ ] `backend/.env` dolu: `DEEPSEEK_API_KEY` (evren_llm_...), `BRAVE_API_KEY`, `LLM_MODEL=deepseek-v4.1-flash`
+      — **`--reload` KAPALI olmalı**: reload her kod değişiminde whisper modelini yeniden yükler.
+- [ ] `backend/.env` dolu: `DEEPSEEK_API_KEY` (evren_llm_...), `BRAVE_API_KEY`, `LLM_MODEL`, `STT_CPU_THREADS=8`
 - [ ] Extension Brave'e yüklendi, panelde backend adresi `http://localhost:8000`
 - [ ] Mikrofon izni verildi (`brave://settings/content/microphone`)
-- [ ] Whisper modeli **bir kez önceden** `POST /stt` ile ısıtıldı (ilk istekte model iniyor!)
-- [ ] `python scripts\test_voice.py` ve `python scripts\test_tools.py` PASS (veya bilinen sapmalar not edildi)
+- [ ] Whisper modeli **bir kez önceden** `POST /stt` ile ısıtıldı (ilk istekte 4,8 sn; sonrası 2,1 sn)
+- [ ] `python scripts\test_voice.py` ve `python scripts\test_tools.py` PASS
+      (yalnızca `web.search` için `BRAVE_API_KEY` şart; diğer 7 kontrol anahtar olmadan da geçer)
 - [ ] Ekran kaydı başlattı (yedek video için), sekme düzeni hazır:
   - Sekme A: Wikipedia makalesi (özetleme) — `https://tr.wikipedia.org/wiki/Yapay_zek%C3%A2`
   - Sekme B: e-ticaret sitesi (arama/fiyat) — `https://www.hepsiburada.com`
@@ -20,6 +22,10 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
 - [ ] Yedek: cevaplar metin kutusuna elle yazılabilir; video kaydı hazır.
 
 **Kural:** Panelin "Neden?" zaman çizelgesi her senaryoda açık tutulur — *açıklanabilirlik* vurgu.
+
+**Sahne arkası (K5 tarafı):** 5 sn ses → `POST /stt` → 2,1 sn (warm) → cevap →
+`POST /tts` → 1,2 sn (ilk) / 0,004 sn (önbellekli). Yani sesli tur başına
+beklenen toplam ses gecikmesi ~3,5 sn; geri kalanı LLM ve tarayıcı adımlarıdır.
 
 ---
 
@@ -49,13 +55,14 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
 - **Beklenen trace adımları:**
   1. `router` — dış bilgi gereksinimi → arama kararı.
   2. `planner` — `web.search {query: "en iyi kablosuz kulaklık 2026", count: 5}`.
-  3. `executor` — `web.search` sonucu: `{results: [{title, url, snippet} × 5]}`.
+  3. `executor` — `web.search` sonucu: `{ok: true, results: [{title, url, snippet} × 5]}`.
   4. `judge` — `pass` (kaynak sayısı yeterli).
   5. `responder` — 3 ürünlü **karşılaştırma tablosu** (fiyat/özellik/kaynak) + `citations[]` dolu.
 - **Beklenen cevap:** Markdown tablo; her satırda kaynak URL; `spoken`: "Üç kulaklığı karşılaştırdım, tabloyu panele bıraktım."
 - **Ters giderse:**
-  - `429` (limit) → "`count: 3` ile tekrar dene" de; hata mesajı panelde görünür → anlat: "Brave API limiti, kısa sürelik."
-  - `BRAVE_API_KEY` hatası → `.env` + uvicorn yeniden başlat (demo ortamında önceden doğrula).
+  - `429` (limit) → "`count: 3` ile tekrar dene" de; hata mesajı panelde görünür → anlat: "Brave API limiti, kısa sürelik." (Kod 429'da 2 sn bekleyip bir kez daha dener.)
+  - `BRAVE_API_KEY ayarlanmamış` → `.env` + uvicorn yeniden başlat (demo ortamında önceden doğrula).
+  - Arama çalışmazsa → `memory.search` ile önceden kaydedilmiş bir notu gösterip "hafıza" özelliğini anlat (kurtarma yolu).
 
 ---
 
@@ -75,6 +82,7 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
 - **Ters giderse:**
   - Site tasarımı değişti / ref yok → ikinci kez `browser.snapshot` iste ("yenile" de).
   - `browser.type (submit)` onayı 60 sn içinde cevaplanmazsa **reddedilmiş sayılır** → tekrar iste ve hemen onayla.
+  - Fiyat okunamazsa → `browser.read` yerine `browser.read {}` ile sayfa metnini al, fiyatları elle oku ve anlat.
 
 ---
 
@@ -109,16 +117,21 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
   2. `executor` — `{ok: true, id: "rem_…"}` (geçmiş zaman hatası olmaz; `TIMEZONE=Europe/Istanbul`).
   3. `judge` → `responder` — "Yarın 10:00 için hatırlatıcı kurdum."
 - **Beklenen cevap:** Kurulum onayı; ayrıca paneldeki bildirim balonu görünür.
-- **Canal gösterim (isteğe bağlı):** "Bir dakika sonra da bir hatırlatıcı kur" →
+- **Canlı gösterim (isteğe bağlı):** "Bir dakika sonra da bir hatırlatıcı kur" →
   ~60 sn sonra sunucu `notify` frame'i gönderir → panelde:
   `{"type": "notify", "text": "Hatırlatma: …", "spoken": "…"}` (K3'ün 30 sn `due()` döngüsü).
 - **Ters giderse:**
-  - "Geçmiş zaman" hatası alınırsa → güncel saati söyleyip tekrar dene.
+  - "Geçmiş bir zaman seçilemez" hatası alınırsa → güncel saati söyleyip tekrar dene.
   - notify gelmezse → `reminders.list` ile kaydı göster, 30 sn döngüsünü anlat.
+  - Panelde saat kaymış görünürse → `tzdata` kurulu mu bak (`requirements.txt`'de var);
+    `due_iso` yerel saat (+03:00) olarak döner, kayıt veritabanında UTC saklanır.
 
 ---
 
 ## Senaryo 6 — Masaüstü (CUA açıksa) (~1 dk)
+
+> **Sahiplik notu:** CUA entegrasyonu ve **yedek demo videosu Kişi 4'ün** işidir
+> (ORTAK BAĞLAM §9, saat 6). K5 yalnızca bu senaryoyu akışta konumlandırır.
 
 - **Ön koşul:** `CUA_ENABLED=true`, Docker + CUA sandbox ayakta (K4).
 - **Söylenecek cümle:**
@@ -129,9 +142,10 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
   3. `judge` → `responder` — "Metin editörüne Merhaba yazdım."
 - **Beklenen cevap:** Onay + zaman çizelgesinde en az 2 ekran görüntüsü.
 - **Ters giderse (CUA kapalı/kopuksa):**
-  - **Video yedeği:** önceden çekilmiş `demo/cua.mp3`/mp4 kaydını oynat ve de:
+  - **Video yedeği:** K4'ün önceden çektiği `demo/cua.mp4` kaydını oynat ve de:
     "Masaüstü modu Docker gerektiriyor; kayıtta gösteriyorum."
   - 6. saatte CUA kararı: çalışmıyorsa entegrasyona girme, videoya geç.
+  - Video da yoksa → senaryoyu atla, kapanışa geç; 5 dakikalık akışta 15 sn'lik sapma kabul edilebilir.
 
 ---
 

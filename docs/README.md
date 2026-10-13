@@ -7,7 +7,7 @@ tarayıcı/masaüstünü kullanabilen kişisel asistan. Bu belge sistemi **sıf�
 > Sahiplik: Bu README, `scripts/test_*.py`, `backend/voice/*`,
 > `backend/tools/{search,memory,reminders}.py` ve `backend/db.py` → **Kişi 5**.
 > `backend/main.py` ve `backend/tools/registry.py` şu an **geçici iskelettir**
-> (asıl sahipleri Kişi 3).
+> (asıl sahipleri Kişi 3). Devir notları: [`docs/HANDOFF-K3.md`](HANDOFF-K3.md).
 
 ---
 
@@ -16,11 +16,15 @@ tarayıcı/masaüstünü kullanabilen kişisel asistan. Bu belge sistemi **sıf�
 | Şey | Not |
 |---|---|
 | Windows 10/11 | Demo makinesi. Windows 10 Home'da *Windows Sandbox* yoktur. |
-| Python **3.11+** | 3.12/3.13 ile test edildi (`py -3.12 -m venv .venv`). |
+| Python **3.11–3.13** | `py -3.12 -m venv .venv` ile kuruldu ve test edildi. **Python 3.14 kullanmayın**: `faster-whisper`'ın bağımlılığı `ctranslate2` için 3.14 tekerleği (wheel) henüz güvenilir değil, derleme denemesi zaman kaybettirir. |
 | Node.js 18+ | Extension'ı derlemek için (`extension/`). |
 | Brave tarayıcı | Yan panel + mikrofon izni. |
 | İnternet | EVREN/DeepSeek LLM, Brave Search API, edge-tts, whisper model indirme. |
 | Docker Desktop + WSL2 | *İsteğe bağlı* — yalnızca masaüstü (CUA) demosu için. |
+
+> **Dikkat:** Bu makinede `py` komutunun varsayılanı 3.14, `python` ise 3.13'tür.
+> Sanal ortamı **her zaman sürümü açıkça yazarak** kurun (`py -3.12 -m venv .venv`),
+> yoksa `python -m venv` yanlış sürümü seçebilir.
 
 ---
 
@@ -36,12 +40,14 @@ copy .env.example .env
 | Değer | Ne yazılır | Nereden alınır |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | `evren_llm_...` | EVREN panelinden aldığın API anahtarı |
-| `DEEPSEEK_BASE_URL` | `https://evren-llmapi.ssyz.org.tr/v1` | Hazır. **Sonuna `/v1` ekleme**, openai SDK'ya olduğu gibi verilir. |
-| `LLM_MODEL` | `deepseek-v4.1-flash` | EVREN → Models |
+| `DEEPSEEK_BASE_URL` | `https://evren-llmapi.ssyz.org.tr/v1` | **K3 onayı bekliyor** — ORTAK BAĞLAM §4 farklı. Bkz. HANDOFF-K3.md |
+| `LLM_MODEL` | `deepseek-v4.1-flash` | **K3 onayı bekliyor** — ORTAK BAĞLAM §4'te boş. |
 | `BRAVE_API_KEY` | `BSA...` | https://brave.com/search/api/ (ücretsiz katman: aylık 2.000 istek) |
-| `STT_MODEL` | `small` | CPU'da hız için `small` kal; `base` dene ama yavaştır. |
+| `STT_MODEL` | `small` | Sözleşmeli varsayılan. Yavaş kalırsa `base`'e düşülebilir (**base daha hızlıdır**, bkz. §6). |
+| `STT_CPU_THREADS` | `8` | Boş bırakılırsa mantıksal çekirdek/2. Mantıksal çekirdek sayısını vermek CTranslate2'de oversubscription yapıp **yavaşlatır**. |
 | `TTS_VOICE` | `tr-TR-EmelNeural` | Hazır |
 | `TIMEZONE` | `Europe/Istanbul` | Hazır |
+| `ASSISTANT_DB` | *(boş)* | İsteğe bağlı; testler için ayrı veritabanı yolu. Boşsa `backend/data/assistant.db`. |
 | `CUA_ENABLED` | `false` | Masaüstü demosu açıksa `true` |
 | `DESKTOP_PARSER` | `ocr` | `ocr` \| `omniparser` |
 
@@ -55,7 +61,7 @@ copy .env.example .env
 Repo **kökünden** çalıştırın (`backend` bir pakettir):
 
 ```powershell
-cd C:\Kullanıcılar\<sen>\assistant
+cd C:\Users\<sen>\assistant
 py -3.12 -m venv .venv
 .venv\Scripts\activate
 pip install -r backend\requirements.txt
@@ -65,7 +71,7 @@ uvicorn backend.main:app --reload --port 8000
 Doğrulama: tarayıcıda <http://localhost:8000/health> → `{"ok": true}`
 
 İlk `POST /stt` çağrısında faster-whisper modeli (~460 MB, `small`) indirilir;
-bu normaldir, bir kez olur ve bellekte kalır.
+bu normaldir, bir kez olur ve bellekte kalır (ilk çağrı ~4,8 sn; sonrakiler ~2,1 sn).
 
 ---
 
@@ -106,24 +112,27 @@ python scripts\test_tools.py     # web.search, memory.*, reminders.* gerçek API
 - `test_voice.py` örnek sesi `edge-tts` ile üretir; kendi dosyanı vermek için:
   `python scripts\test_voice.py yol\ara.webm`.
 - `test_tools.py` için `.env` içinde `BRAVE_API_KEY` **zorunludur** ve internet gerekir.
-- Testler `backend/data/` içine yazar (db önbelleği, örnek mp3).
+- Test araçları **gerçek `assistant.db`'yi kirletmez**: `ASSISTANT_DB` geçici bir
+  dosyaya yönlendirilir ve test sonunda silinir (`--keep` ile korunur).
+  `test_voice.py` ise `backend/data/` altına örnek mp3 yazar.
 
-### Ses gecikmesi (ölçüm — Ryzen 7 4800H / 16 mantıksal çekirdek, 5.8 sn'lik örnek ses)
+### Ölçülen gecikmeler (Ryzen 7 4800H, 8 fiziksel çekirdek, 5,8 sn'lik örnek ses)
 
 | Adım | Hedef | Ölçüm |
 |---|---|---|
-| STT `small` — ilk çağrı (model yüklenir) | — | 4.98 sn |
-| STT `small` — warm (model bellekte) | < 3 sn | **2.90 sn ✓** |
-| STT `base` — ilk çağrı | — | 2.08 sn |
-| STT `base` — warm | < 3 sn | **0.93 sn ✓ (demo için önerilir)** |
-| TTS — ilk çağrı (edge-tts, ağ) | < 1.5 sn | ~1–4 sn (429 alınırsa +3 sn tekrar) |
-| TTS — önbellekli | < 0.2 sn | 0.003–0.005 sn ✓ |
+| STT `small` — ilk çağrı (model yüklenir) | — | 4,80 sn |
+| STT `small` — warm (model bellekte, `cpu_threads=8`) | < 3 sn | **2,14 sn ✓** |
+| STT `small` — warm (`cpu_threads` ayarsız, eski) | < 3 sn | 2,90 sn (marj %3 — kırılgan) |
+| STT `base` — warm | < 3 sn | 0,93 sn |
+| TTS — ilk çağrı (edge-tts, ağ) | < 1,5 sn | **1,19 sn ✓** |
+| TTS — önbellekli | < 0,2 sn | 0,003–0,005 sn ✓ |
 | Uçtan uca: bas-konuş → sesli cevap | < 8 sn | *(panelle entegrasyonda ölçülecek)* |
 
-**Not:** Hedefe `base` ile rahatça ulaşılır; doğruluk küçük bir düşüş görür
-("testi" → "deste" gibi). Demo için `backend/.env` içinde `STT_MODEL=base` önerilir,
-sözleşmeli varsayılan `small` korunmuştur. Örnek webm + Türkçe cümle mp3 çevirisi
-`python scripts\test_voice.py` ile otomatik doğrulanır.
+**Not:** `small` hedefi `cpu_threads=8` ile rahatça tutturuyor (2,14 sn / 3,00 sn).
+Yine de yavaş kalırsa `.env` içinde `STT_MODEL=base` yapın (~3× hız, Türkçe
+doğrulukta küçük düşüş: "testi" → "deste" gibi). Sözleşmeli varsayılan `small`
+korunmuştur. `--reload` açıkken her kod değişikliği modeli yeniden yükler; demo
+sırasında `--reload` kullanmayın.
 
 ---
 
@@ -143,17 +152,19 @@ sözleşmeli varsayılan `small` korunmuştur. Örnek webm + Türkçe cümle mp3
 
 | Belirti | Çözüm |
 |---|---|
-| `/stt` çok yavaş (5 sn ses > 3 sn) | `STT_MODEL=small` kullan (`base` daha yavaştır). İlk çağrı model indiriyor olabilir; ikinciyi dene. |
+| `/stt` hedefi tutmuyor (5 sn ses > 3 sn) | Önce **`STT_CPU_THREADS=8`** olduğundan emin ol (mantıksal çekirdek sayısını vermek yavaşlatır). İlk çağrı model indiriyor olabilir; ikinciyi dene. Hâlâ yavaşsa `STT_MODEL=base` yap — **base small'dan ~3× hızlıdır** (0,93 sn vs 2,14 sn), doğruluk biraz düşer. |
 | `/stt` 500 döndü | Dosya biçimi webm/opus olmalı (PyAV çözer, ffmpeg gerekmez). `python scripts\test_voice.py` ile ayrı ayrı doğrula. |
-| `/tts` **503** | edge-tts resmî olmayan istemci ve internet ister. **Not:** Microsoft 2026-10'da sentesi taşıdığı için eski sürümde 403 çıkabilir; `voice/tts.py` bu geçici düzeltmeyi (yeni uç nokta) otomatik uygular — bkz. [edge-tts#490](https://github.com/rany2/edge-tts/issues/490). Yine de 503 gelirse bağlantı/proxy kontrolü; panel otomatik olarak tarayıcı sesine geçer. |
+| `/tts` **503** | edge-tts resmî olmayan istemci ve internet ister. İlk denemede başarısız olursa kod bir kez **yedek uç nokta** ile tekrarlar (bkz. `voice/tts.py::_apply_edge_workaround`). Varsayılan uç nokta bu makinede doğrulandı (1,19 sn). Yine 503 gelirse bağlantı/proxy kontrolü; panel otomatik olarak tarayıcı sesine geçer. |
 | `BRAVE_API_KEY ayarlanmamış` | `.env` içinde doldur ve **uvicorn'ı yeniden başlat**. |
 | `web.search` boş dönüyor | `.env` içinde `BRAVE_API_KEY` var mı, **uvicorn yeniden başlatıldı mı**? |
-| Brave **429** | Aylık istek limiti doldu; bekle veya `count` değerini düşür. |
+| Brave **429** | Aylık istek limiti doldu; bekle veya `count` değerini düşür. Kod 429'da 2 sn bekleyip yedek uç nokta ile bir kez tekrar dener. |
 | Panel "Bağlantı yok" | uvicorn çalışıyor mu? `http://localhost:8000/health`. Ayarlardaki backend adresini kontrol et. |
 | Mikrofon izni reddedildi | `brave://settings/content/microphone` → siteye izin ver. |
+| Hatırlatıcı 3 saat erken/geç geliyor | `tzdata` kurulu mu (`pip install tzdata`)? `TIMEZONE` çözülemezse kod sabit +03:00'a düşer ve **uyarı loglar**; UTC'ye düşmez. |
 | `ZoneInfo` hatası (reminders) | `pip install tzdata` (requirements.txt'de var). |
-| Python 3.13 + pip tuhaflıkları | `py -3.12 -m venv .venv` kullan (bu demoda öyle kuruldu). |
+| Python sürümü / pip tuhaflıkları | `py -3.12 -m venv .venv` kullan (bu demoda öyle kuruldu). Python 3.14'ten kaçın. |
 | `/ws` 404 | `/ws` WebSocket endpoint'i **Kişi 3**'tedir; şu an yalnızca ses/araç uç noktaları çalışır. |
+| `GET /v1/models` 404 logu | Sözleşmede `/v1` proxy'si yoktur; LLM çağrıları backend içinde (K3 `llm.py`) yapılır, panel yalnızca `/ws` kullanır. |
 
 ---
 
@@ -171,3 +182,16 @@ Tool adları: `web.search`, `memory.save`, `memory.search`,
 `reminders.add`, `reminders.list` → hepsi `risk: safe`, `tools/registry.py`
 üzerinden kayıtlıdır. `reminders` için ayrıca `async def due()` vardır; Kişi 3
 bunu 30 saniyede bir çağırıp `notify` gönderir.
+
+**Not:** `reminders.list` ve `due()` çıktısındaki `due_iso` alanı **yerel saat**
+(`Europe/Istanbul`, örn. `2026-10-14T10:00:00+03:00`) biçimindedir; veritabanında
+ise UTC saklanır. İkisi de geçerli ISO 8601'dir ve aynı anı gösterir.
+
+---
+
+## 9. Kişi 3'e devir
+
+Bu repoda K5'in dokunduğu **K3 sahipli** dosyalar ve yapılması gerekenler
+`docs/HANDOFF-K3.md` içindedir. Özet: `backend/main.py` ve
+`backend/tools/registry.py` geçici iskelettir, `.env.example` içindeki LLM
+değerleri K3 onayı bekler.
