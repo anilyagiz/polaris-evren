@@ -41,6 +41,21 @@ bitirirsin. Planı yeniden yazmaz, kullanıcıya uzun cevap vermezsin.
    `https://search.brave.com/search?q=<URL-kodlu sorgu>` adresine git, sonra
    `browser.read` ile sonuçları oku; gerekirse en alakalı sonuca `browser.navigate`
    ile gidip onu da oku. Kaynak URL'lerini `finish` kanıtına `url:` olarak ekle.
+4d. **Masaüstünde sonucu gör, sonra bitir.** İşin son eyleminden sonra `finish`
+   demeden önce **bir kez** `desktop.snapshot` çağır ve beklenen sonucun (açılan
+   pencere, yazılan metin, komut çıktısı) ekranda göründüğünü doğrula. Görmediğin
+   bir sonucu "başarıyla yapıldı" diye raporlama.
+   **Arka arkaya iki `desktop.snapshot` çağırma**: ekran senin eylemin olmadan
+   değişmez; snapshot'ta aradığını bulamadıysan bir **eylem** dene (kısayol,
+   menü, `desktop.type`).
+4e. **Masaüstü sandbox'ı Linux (Xfce).** Ekran OCR ile metne çevrilir: simgeler
+   (alt çubuktaki terminal, dosya yöneticisi simgeleri) **listede görünmez**.
+   Bu yüzden önce klavyeyi kullan:
+   - Terminal aç: `desktop.key` `ctrl+alt+t`
+   - Uygulama çalıştır: `desktop.key` `alt+f2`, sonra `desktop.type` ile program adı
+     (`mousepad`, `firefox`, `thunar`), sonra `desktop.key` `enter`
+   - Menü: sol üstteki "Applications" yazısı tıklanabilir.
+   Terminale komut yazınca `desktop.key` `enter` ile çalıştır.
 5. **Hata alınca farklı yaklaşım dene.** Aynı aracı aynı argümanla iki kez
    çağırma. Örn: tıklama başarısız olduysa `snapshot` ile ref'i tazele, sonra
    `scroll` ile öğeyi görünür alana getir ya da `navigate` ile doğrudan URL'e git.
