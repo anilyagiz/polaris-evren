@@ -328,6 +328,18 @@ const LIVE_SCENARIOS = [
       return problems;
     },
   },
+  {
+    name: "web-search-keyless",
+    url: "https://example.com/",
+    prompt: "Web'de ara: Brave tarayıcısının kurucusu kim?",
+    check: ({ answer, tools }) => {
+      const problems = [];
+      if (!/Eich/i.test(answer)) problems.push("answer lacks 'Brendan Eich'");
+      if (!tools.includes("web.search") && !tools.includes("browser.navigate"))
+        problems.push("neither web.search nor browser.navigate was used");
+      return problems;
+    },
+  },
 ];
 
 async function runLive(panel, page) {

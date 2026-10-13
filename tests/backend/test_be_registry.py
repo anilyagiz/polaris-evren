@@ -57,8 +57,9 @@ def test_name_mapping_roundtrip():
     assert reg.from_llm_name(reg.llm_name("web.search")) == "web.search"
 
 
-def test_list_for_hides_web_search_without_brave_key(monkeypatch):
+def test_list_for_hides_web_search_without_any_provider(monkeypatch):
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.setenv("WEB_SEARCH_FALLBACK", "off")
     for n in ("browser.snapshot", "web.search"):
         reg.register(mk(n))
     assert {t.name for t in reg.list_for("browser_task")} == {"browser.snapshot"}

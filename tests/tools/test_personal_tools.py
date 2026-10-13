@@ -83,8 +83,10 @@ def test_search_success_strips_html(monkeypatch):
 
 def test_search_errors(monkeypatch):
     monkeypatch.setenv("BRAVE_API_KEY", "")
+    monkeypatch.setenv("WEB_SEARCH_FALLBACK", "off")
     out = call("web.search", {"query": "x"})
     assert out["ok"] is False and "BRAVE_API_KEY" in out["error"]
+    monkeypatch.delenv("WEB_SEARCH_FALLBACK")
 
     monkeypatch.setenv("BRAVE_API_KEY", "k")
     mock_http(monkeypatch, lambda r: httpx.Response(429))
@@ -196,3 +198,21 @@ def test_db_wal_and_autocreate(tmp_path, monkeypatch):
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     call("memory.save", {"text": "ilk"})
     assert (tmp_path / "sub" / "x.db").exists()
+
+
+def test_search_keyless_duckduckgo_fallback(monkeypatch):
+    monkeypatch.setenv("BRAVE_API_KEY", "")
+    monkeypatch.delenv("WEB_SEARCH_FALLBACK", raising=False)
+    page = (
+        '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Ftr.wikipedia.org%2Fwiki%2FBrave&amp;rut=x">'
+        "<b>Brave</b> - Vikipedi</a> ... "
+        '<a class="result__snippet" href="#">Brave bir <b>tarayıcı</b>dır.</a>'
+    )
+    mock_http(monkeypatch, lambda r: httpx.Response(200, text=page))
+    out = call("web.search", {"query": "brave"})
+    assert out["ok"] is True
+    assert out["results"][0] == {
+        "title": "Brave - Vikipedi",
+        "url": "https://tr.wikipedia.org/wiki/Brave",
+        "snippet": "Brave bir tarayıcıdır.",
+    }

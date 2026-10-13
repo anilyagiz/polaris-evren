@@ -41,7 +41,9 @@ async def web_search(query: str, count: int = DEFAULT_COUNT) -> dict:
     db.load_env()
     api_key = os.getenv("BRAVE_API_KEY", "").strip()
     if not api_key:
-        return {"ok": False, "error": "Web araması yapılandırılmamış: BRAVE_API_KEY eksik."}
+        if os.getenv("WEB_SEARCH_FALLBACK", "duckduckgo").strip().lower() in ("off", "none", "0", "false"):
+            return {"ok": False, "error": "Web araması yapılandırılmamış: BRAVE_API_KEY eksik."}
+        return await _duckduckgo_search(query, count)
 
     headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
     params = {"q": query[:400], "count": count}  # Brave rejects queries over 400 chars
@@ -83,6 +85,56 @@ async def web_search(query: str, count: int = DEFAULT_COUNT) -> dict:
     return {"ok": True, "results": results}
 
 
+DDG_URL = "https://html.duckduckgo.com/html/"
+_DDG_RESULT = re.compile(
+    r'class="result__a"[^>]*href="(?P<url>[^"]+)"[^>]*>(?P<title>.*?)</a>'
+    r'.*?class="result__snippet"[^>]*>(?P<snippet>.*?)</a>',
+    re.S,
+)
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
+
+
+def _ddg_target(url: str) -> str:
+    """DuckDuckGo wraps links as //duckduckgo.com/l/?uddg=<encoded>; unwrap them."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    url = html.unescape(url)
+    if url.startswith("//"):
+        url = "https:" + url
+    parsed = urlparse(url)
+    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        target = parse_qs(parsed.query).get("uddg", [""])[0]
+        return unquote(target) or url
+    return url
+
+
+async def _duckduckgo_search(query: str, count: int) -> dict:
+    """Keyless fallback used when BRAVE_API_KEY is not set."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_S, follow_redirects=True) as client:
+            response = await client.post(DDG_URL, data={"q": query[:400]}, headers={"User-Agent": _UA})
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "Arama zaman aşımına uğradı, lütfen tekrar deneyin."}
+    except httpx.HTTPError as exc:
+        logger.warning("DuckDuckGo search failed: %s", exc)
+        return {"ok": False, "error": "Arama servisine ulaşılamadı. İnternet bağlantısını kontrol edin."}
+    if response.status_code != 200:
+        return {"ok": False, "error": f"Arama servisi hata döndürdü (HTTP {response.status_code})."}
+    results = []
+    for match in _DDG_RESULT.finditer(response.text):
+        url = _ddg_target(match.group("url"))
+        if not url.startswith(("http://", "https://")) or "duckduckgo.com/y.js" in url:
+            continue  # sponsored/ad links
+        results.append(
+            {"title": strip_html(match.group("title")), "url": url, "snippet": strip_html(match.group("snippet"))}
+        )
+        if len(results) >= count:
+            break
+    if not results:
+        return {"ok": False, "error": "Arama sonuç döndürmedi; sorguyu değiştirip tekrar deneyin."}
+    return {"ok": True, "results": results, "provider": "duckduckgo"}
+
+
 async def _handle_search(args: dict, ctx: ToolContext) -> dict:
     """Tool handler: validate arguments and delegate to web_search."""
     query = str(args.get("query") or "").strip()
@@ -98,7 +150,7 @@ async def _handle_search(args: dict, ctx: ToolContext) -> dict:
 db.register_once(
     Tool(
         name="web.search",
-        description="Brave Search ile internette arama yapar; her sonuç için başlık, URL ve kısa özet döndürür. "
+        description="İnternette arama yapar (Brave Search API, anahtar yoksa DuckDuckGo); her sonuç için başlık, URL ve kısa özet döndürür. "
         "Güncel bilgi, ürün karşılaştırma ve kaynak gereken sorular için kullan.",
         parameters={
             "type": "object",

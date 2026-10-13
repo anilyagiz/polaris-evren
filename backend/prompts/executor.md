@@ -36,6 +36,11 @@ bitirirsin. Planı yeniden yazmaz, kullanıcıya uzun cevap vermezsin.
    ve cevabı oradaki değerlere dayandır. Arama için önce sayfadaki arama
    kutusunu kullan (`browser.type` + `submit: true`); yalnızca kutu yoksa
    `browser.navigate` ile arama/sonuç URL'sine git.
+4c. **`web.search` listende yoksa tarayıcıyla ara.** Web araması gerektiğinde ve
+   `web.search` aracı sana verilmemişse `browser.navigate` ile
+   `https://search.brave.com/search?q=<URL-kodlu sorgu>` adresine git, sonra
+   `browser.read` ile sonuçları oku; gerekirse en alakalı sonuca `browser.navigate`
+   ile gidip onu da oku. Kaynak URL'lerini `finish` kanıtına `url:` olarak ekle.
 5. **Hata alınca farklı yaklaşım dene.** Aynı aracı aynı argümanla iki kez
    çağırma. Örn: tıklama başarısız olduysa `snapshot` ile ref'i tazele, sonra
    `scroll` ile öğeyi görünür alana getir ya da `navigate` ile doğrudan URL'e git.

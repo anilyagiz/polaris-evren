@@ -114,8 +114,9 @@ def list_for(route: str) -> list[Tool]:
         logger.warning("Unknown route %r, no tools exposed", route)
         return []
     tools = [t for t in (_REGISTRY.get(n) for n in names) if t is not None]
-    if not (os.environ.get("BRAVE_API_KEY") or "").strip():
-        # Without a key web.search can only fail; don't tempt the model with it.
+    fallback = (os.environ.get("WEB_SEARCH_FALLBACK") or "duckduckgo").strip().lower()
+    if not (os.environ.get("BRAVE_API_KEY") or "").strip() and fallback in ("off", "none", "0", "false"):
+        # No key and no keyless fallback: web.search can only fail.
         tools = [t for t in tools if t.name != "web.search"]
     missing = [n for n in names if n not in _REGISTRY]
     if missing:
