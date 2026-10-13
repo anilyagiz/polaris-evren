@@ -120,16 +120,16 @@ python scripts\test_tools.py     # web.search, memory.*, reminders.* gerçek API
 
 | Adım | Hedef | Ölçüm |
 |---|---|---|
-| STT `small` — ilk çağrı (model yüklenir) | — | 4,80 sn |
-| STT `small` — warm (model bellekte, `cpu_threads=8`) | < 3 sn | **2,14 sn ✓** |
-| STT `small` — warm (`cpu_threads` ayarsız, eski) | < 3 sn | 2,90 sn (marj %3 — kırılgan) |
+| STT `small` — ilk çağrı (model yüklenir) | — | 4,80–5,23 sn |
+| STT `small` — warm (model bellekte, `cpu_threads=8`) | < 3 sn | **2,14 / 2,42 sn ✓** |
+| STT `small` — warm (`cpu_threads` ayarsız, eski sürüm) | < 3 sn | 2,90 sn (marj %3 — kırılgan) |
 | STT `base` — warm | < 3 sn | 0,93 sn |
 | TTS — ilk çağrı (edge-tts, ağ) | < 1,5 sn | **1,19 sn ✓** |
 | TTS — önbellekli | < 0,2 sn | 0,003–0,005 sn ✓ |
 | Uçtan uca: bas-konuş → sesli cevap | < 8 sn | *(panelle entegrasyonda ölçülecek)* |
 
-**Not:** `small` hedefi `cpu_threads=8` ile rahatça tutturuyor (2,14 sn / 3,00 sn).
-Yine de yavaş kalırsa `.env` içinde `STT_MODEL=base` yapın (~3× hız, Türkçe
+**Not:** `small` hedefi `cpu_threads=8` ile rahatça tutturuyor (~2,2 sn / 3,00 sn).
+Yine de yavaş kalırsa `.env` içinde `STT_MODEL=base` yapın (~2× hız, Türkçe
 doğrulukta küçük düşüş: "testi" → "deste" gibi). Sözleşmeli varsayılan `small`
 korunmuştur. `--reload` açıkken her kod değişikliği modeli yeniden yükler; demo
 sırasında `--reload` kullanmayın.
@@ -152,12 +152,14 @@ sırasında `--reload` kullanmayın.
 
 | Belirti | Çözüm |
 |---|---|
-| `/stt` hedefi tutmuyor (5 sn ses > 3 sn) | Önce **`STT_CPU_THREADS=8`** olduğundan emin ol (mantıksal çekirdek sayısını vermek yavaşlatır). İlk çağrı model indiriyor olabilir; ikinciyi dene. Hâlâ yavaşsa `STT_MODEL=base` yap — **base small'dan ~3× hızlıdır** (0,93 sn vs 2,14 sn), doğruluk biraz düşer. |
+| `/stt` hedefi tutmuyor (5 sn ses > 3 sn) | Önce **`STT_CPU_THREADS=8`** olduğundan emin ol (mantıksal çekirdek sayısını vermek yavaşlatır). İlk çağrı model indiriyor olabilir; ikinciyi dene. Hâlâ yavaşsa `STT_MODEL=base` yap — **base small'dan ~2× hızlıdır** (0,93 sn vs ~2,2 sn), doğruluk biraz düşer. |
 | `/stt` 500 döndü | Dosya biçimi webm/opus olmalı (PyAV çözer, ffmpeg gerekmez). `python scripts\test_voice.py` ile ayrı ayrı doğrula. |
 | `/tts` **503** | edge-tts resmî olmayan istemci ve internet ister. İlk denemede başarısız olursa kod bir kez **yedek uç nokta** ile tekrarlar (bkz. `voice/tts.py::_apply_edge_workaround`). Varsayılan uç nokta bu makinede doğrulandı (1,19 sn). Yine 503 gelirse bağlantı/proxy kontrolü; panel otomatik olarak tarayıcı sesine geçer. |
+| TTS için ikinci bir motor yok mu? | **Bilinçli tercih.** `gTTS` denendi ama `click<8.2` istiyor; `huggingface-hub` (faster-whisper'ın model indiricisi) ise `click>=8.4.2` istiyor. İkisi aynı ortamda çalışmıyor ve whisper'ın model indirmesi bozuluyor. Sözleşmenin öngördüğü yedek yol panelin kendi tarayıcı sesidir. |
+| `memories`/`reminders` tablosu eski şemada kalmış | Kod ilk kullanımda **otomatik göç ettirir**: `id TEXT` → `id INTEGER`, eksikse `text_norm` eklenip doldurulur. Eski kayıtlar korunur, log'da `rebuilding the table with an integer id` görünür. |
 | `BRAVE_API_KEY ayarlanmamış` | `.env` içinde doldur ve **uvicorn'ı yeniden başlat**. |
 | `web.search` boş dönüyor | `.env` içinde `BRAVE_API_KEY` var mı, **uvicorn yeniden başlatıldı mı**? |
-| Brave **429** | Aylık istek limiti doldu; bekle veya `count` değerini düşür. Kod 429'da 2 sn bekleyip yedek uç nokta ile bir kez tekrar dener. |
+| Brave **429** | Aylık istek limiti doldu; bekle veya `count` değerini düşür. `web.search` anlaşılır bir hata döner, otomatik tekrar denemez. |
 | Panel "Bağlantı yok" | uvicorn çalışıyor mu? `http://localhost:8000/health`. Ayarlardaki backend adresini kontrol et. |
 | Mikrofon izni reddedildi | `brave://settings/content/microphone` → siteye izin ver. |
 | Hatırlatıcı 3 saat erken/geç geliyor | `tzdata` kurulu mu (`pip install tzdata`)? `TIMEZONE` çözülemezse kod sabit +03:00'a düşer ve **uyarı loglar**; UTC'ye düşmez. |
@@ -186,6 +188,11 @@ bunu 30 saniyede bir çağırıp `notify` gönderir.
 **Not:** `reminders.list` ve `due()` çıktısındaki `due_iso` alanı **yerel saat**
 (`Europe/Istanbul`, örn. `2026-10-14T10:00:00+03:00`) biçimindedir; veritabanında
 ise UTC saklanır. İkisi de geçerli ISO 8601'dir ve aynı anı gösterir.
+
+**Not:** `memory.save` ve `reminders.add` dönen `id`, `memory.search` /
+`reminders.list` çıktısındaki `id` alanları **tam sayıdır** (SQLite `INTEGER
+PRIMARY KEY`). `reminders.list` yalnızca **henüz bildirilmemiş** hatırlatıcıları
+döndürür; zamanı geçip `due()` ile işaretlenenler listeden düşer.
 
 ---
 

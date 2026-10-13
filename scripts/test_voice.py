@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Kişi 5 — ses testi (STT + TTS).
+"""Person 5 / K5 — voice smoke test (STT + TTS).
 
-Bir örnek ses dosyasını metne, bir Türkçe cümleyi mp3'e çevirir.
-Bağımsız çalışır: FastAPI uygulamasını bellekte kurup TestClient ile çağırır.
+Transcribes a sample recording to text and renders a Turkish sentence to mp3.
+Runs standalone: it builds the FastAPI app in memory and drives it with TestClient.
 
-Kullanım:
-    python scripts/test_voice.py                 # örnek sesi kendisi üretir (edge-tts)
-    python scripts/test_voice.py yol/ara.webm    # kendi örnek dosyanı verir
+Usage:
+    python scripts/test_voice.py                 # generates the sample itself (edge-tts)
+    python scripts/test_voice.py path/to/audio.webm   # use your own file
 
-Not: İlk çalıştırmada faster-whisper modeli (~460 MB, "small") indirilir.
+Note: the first run downloads the faster-whisper model (~460 MB for "small").
 """
 from __future__ import annotations
 
@@ -22,12 +22,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# Windows konsolu cp1252 olabilir; Türkçe çıktı çökmesin diye UTF-8'e çevir.
+# The Windows console may be cp1252; keep Turkish output from crashing.
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("_", "-") != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 if os.name == "nt":
-    os.system("chcp 65001 >NUL")  # konsol kod sayfası
+    os.system("chcp 65001 >NUL")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -40,21 +40,21 @@ SAMPLE_SENTENCE = "Merhaba, bu bir ses testi. Kişi beşin ses modülü çalış
 WORK_DIR = ROOT / "backend" / "data" / "test_voice"
 
 
-# --- Örnek ses üretimi -----------------------------------------------------
+# --- sample generation -----------------------------------------------------
 
 def _synth_sample_via_api(client: TestClient, dst: Path) -> bool:
-    """Örnek sesi gerçek /tts ucundan üretir (demo ile tam aynı yol)."""
+    """Produce the sample through the real /tts endpoint (same path as the demo)."""
     resp = client.post("/tts", json={"text": SAMPLE_SENTENCE})
     if resp.status_code == 200 and len(resp.content) > 1000:
         dst.write_bytes(resp.content)
-        print(f"  örnek mp3 /tts ucundan üretildi ({len(resp.content)} bayt)")
+        print(f"  sample mp3 produced via /tts ({len(resp.content)} bytes)")
         return True
-    print(f"  [!] /tts örnek üretilemedi: HTTP {resp.status_code} {resp.text[:200]}")
+    print(f"  [!] /tts could not produce the sample: HTTP {resp.status_code} {resp.text[:200]}")
     return False
 
 
 def _synth_sample_sapi(dst: Path) -> bool:
-    """Yedek: Windows SAPI ile wav üretir (edge-tts erişilemezse)."""
+    """Fallback: generate a wav with the Windows SAPI voice."""
     if os.name != "nt":
         return False
     command = (
@@ -72,15 +72,15 @@ def _synth_sample_sapi(dst: Path) -> bool:
         )
         ok = dst.is_file() and dst.stat().st_size > 0
         if ok:
-            print("  örnek ses Windows SAPI ile üretildi (yedek yol)")
+            print("  sample produced with Windows SAPI (fallback path)")
         return ok
     except Exception as exc:  # noqa: BLE001
-        print(f"  [!] SAPI örnek üretilemedi: {exc}")
+        print(f"  [!] SAPI could not produce the sample: {exc}")
         return False
 
 
 def _mp3_to_webm_with_av(src: Path, dst: Path) -> bool:
-    """PyAV ile mp3 -> webm/opus dönüşümü (ffmpeg gerekmez)."""
+    """Convert mp3 -> webm/opus with PyAV (no ffmpeg binary needed)."""
     try:
         import av
     except ImportError:
@@ -95,7 +95,7 @@ def _mp3_to_webm_with_av(src: Path, dst: Path) -> bool:
                 try:
                     ostream = out.add_stream(codec_name, rate=48000)
                     break
-                except Exception:  # noqa: BLE001 — kodlayıcı yoksa sıradakini dene
+                except Exception:  # noqa: BLE001 — try the next encoder
                     ostream = None
             if ostream is None:
                 return False
@@ -115,12 +115,12 @@ def _mp3_to_webm_with_av(src: Path, dst: Path) -> bool:
                 out.mux(packet)
         return dst.is_file() and dst.stat().st_size > 0
     except Exception as exc:  # noqa: BLE001
-        print(f"  [!] PyAV dönüşümü başarısız: {exc}")
+        print(f"  [!] PyAV conversion failed: {exc}")
         return False
 
 
 def _mp3_to_webm_with_ffmpeg(src: Path, dst: Path) -> bool:
-    """Sistemde ffmpeg varsa CLI ile dönüşüm."""
+    """Convert with the ffmpeg CLI when it happens to be installed."""
     if not shutil.which("ffmpeg"):
         return False
     try:
@@ -132,40 +132,40 @@ def _mp3_to_webm_with_ffmpeg(src: Path, dst: Path) -> bool:
         )
         return dst.is_file() and dst.stat().st_size > 0
     except Exception as exc:  # noqa: BLE001
-        print(f"  [!] ffmpeg dönüşümü başarısız: {exc}")
+        print(f"  [!] ffmpeg conversion failed: {exc}")
         return False
 
 
 def make_sample(client: TestClient) -> Path | None:
-    """Örnek sesi üretir: önce /tts, olmazsa SAPI; mümkünse webm'e çevirir."""
+    """Build the sample: prefer /tts, then SAPI; convert to webm when possible."""
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    mp3 = WORK_DIR / "ornek.mp3"
-    wav = WORK_DIR / "ornek_sapi.wav"
+    mp3 = WORK_DIR / "sample.mp3"
+    wav = WORK_DIR / "sample_sapi.wav"
     if _synth_sample_via_api(client, mp3):
         source = mp3
     elif _synth_sample_sapi(wav):
         source = wav
     else:
-        print("  [!] örnek ses üretilemedi; test_voice.py yol/ara.webm ile çalıştırılabilir.")
+        print("  [!] no sample could be produced; run test_voice.py path/to/audio.webm instead.")
         return None
-    webm = WORK_DIR / "ornek.webm"
+    webm = WORK_DIR / "sample.webm"
     if _mp3_to_webm_with_av(source, webm) or _mp3_to_webm_with_ffmpeg(source, webm):
-        print(f"  örnek webm üretildi: {webm}")
+        print(f"  sample webm created: {webm}")
         return webm
-    print("  [!] webm/opus dönüşümü yok; STT kaynak dosya üzerinden test edilecek.")
+    print("  [!] no webm/opus conversion available; testing STT with the source file.")
     return source
 
 
-# --- Testler --------------------------------------------------------------
+# --- tests -----------------------------------------------------------------
 
 def test_stt(client: TestClient, sample: Path | None) -> bool:
     print("\n[1] STT — POST /stt")
     if sample is None or not sample.is_file():
-        print("  FAIL örnek ses yok.")
+        print("  FAIL no sample audio.")
         return False
 
     size = sample.stat().st_size
-    print(f"  dosya: {sample.name}, {size} bayt")
+    print(f"  file: {sample.name}, {size} bytes")
     started = time.perf_counter()
     with sample.open("rb") as handle:
         resp = client.post(
@@ -180,17 +180,17 @@ def test_stt(client: TestClient, sample: Path | None) -> bool:
     data = resp.json()
     text = str(data.get("text", ""))
     duration = float(data.get("duration_s", 0.0))
-    print(f"  metin   : {text!r}")
-    print(f"  dil     : {data.get('language')} | süre: {duration:.2f}s | işlem: {elapsed:.2f}sn")
+    print(f"  text     : {text!r}")
+    print(f"  language : {data.get('language')} | duration: {duration:.2f}s | elapsed: {elapsed:.2f}s")
     if duration >= 4.0:
-        status = "TAMAM" if elapsed < 3.0 else "YAVAŞ — README'ye not ekle"
-        print(f"  hedef   : 5 sn ses için < 3.0 sn -> {status} ({elapsed:.2f} sn)")
+        status = "OK" if elapsed < 3.0 else "SLOW — note it in the README"
+        print(f"  target   : < 3.0s for a 5s clip -> {status} ({elapsed:.2f}s)")
 
     if not text.strip():
-        print("  FAIL boş metin döndü.")
+        print("  FAIL empty transcript.")
         return False
 
-    # Isınmış ölçüm: model yükleme hariç ikinci çağrı (aynı süreçte).
+    # Warm measurement: model already in memory, same process.
     started = time.perf_counter()
     with sample.open("rb") as handle:
         resp_warm = client.post(
@@ -200,24 +200,25 @@ def test_stt(client: TestClient, sample: Path | None) -> bool:
     warm_elapsed = time.perf_counter() - started
     warm_ok = resp_warm.status_code == 200
     print(
-        f"  warm   : {warm_elapsed:.2f} sn (model bellekte; hedef < 3.0 sn -> "
-        f"{'TAMAM' if warm_elapsed < 3.0 else 'YAVAŞ'})"
+        f"  warm     : {warm_elapsed:.2f}s (model in memory; target < 3.0s -> "
+        f"{'OK' if warm_elapsed < 3.0 else 'SLOW'})"
     )
 
-    # Boş ses → {"text": ""}
+    # Empty audio -> {"text": ""}
     resp_empty = client.post(
         "/stt",
-        files={"audio": ("bos.webm", b"", "audio/webm")},
+        files={"audio": ("empty.webm", b"", "audio/webm")},
     )
     empty_ok = resp_empty.status_code == 200 and resp_empty.json().get("text") == ""
-    print(f"  boş ses : {'TAMAM' if empty_ok else 'FAIL ' + resp_empty.text[:200]}")
+    print(f"  empty    : {'OK' if empty_ok else 'FAIL ' + resp_empty.text[:200]}")
     return bool(text.strip()) and empty_ok and warm_ok
 
 
 def test_tts(client: TestClient) -> bool:
     print("\n[2] TTS — POST /tts")
+    payload = {"text": "**Merhaba!** Bu bir testtir 🎧 https://ornek.com"}
     started = time.perf_counter()
-    resp = client.post("/tts", json={"text": f"**Merhaba!** Bu bir testtir 🎧 https://ornek.com"})
+    resp = client.post("/tts", json=payload)
     elapsed = time.perf_counter() - started
 
     if resp.status_code != 200:
@@ -228,28 +229,41 @@ def test_tts(client: TestClient) -> bool:
         print(f"  FAIL content-type: {media_type}")
         return False
     if len(resp.content) < 1000:
-        print(f"  FAIL çok küçük mp3: {len(resp.content)} bayt")
+        print(f"  FAIL mp3 too small: {len(resp.content)} bytes")
         return False
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    out = WORK_DIR / "cevap.mp3"
+    out = WORK_DIR / "answer.mp3"
     out.write_bytes(resp.content)
-    print(f"  mp3     : {out} ({len(resp.content)} bayt, {elapsed:.2f} sn)")
+    print(f"  mp3      : {out} ({len(resp.content)} bytes, {elapsed:.2f}s)")
 
-    # Önbellek ikinci çağrıda hızlı olmalı.
+    # The second call must be served from the cache.
     started = time.perf_counter()
-    resp_cached = client.post("/tts", json={"text": "**Merhaba!** Bu bir testtir 🎧 https://ornek.com"})
+    resp_cached = client.post("/tts", json=payload)
     cached_elapsed = time.perf_counter() - started
     cache_ok = resp_cached.status_code == 200 and len(resp_cached.content) == len(resp.content)
-    print(f"  önbellek: {'TAMAM' if cache_ok else 'FAIL'} ({cached_elapsed:.3f} sn)")
-    return cache_ok
+    print(f"  cache    : {'OK' if cache_ok else 'FAIL'} ({cached_elapsed:.3f}s)")
+
+    # Empty text must be rejected with 400, not 500.
+    resp_blank = client.post("/tts", json={"text": "   ***   "})
+    blank_ok = resp_blank.status_code == 400
+    print(f"  blank    : {'OK' if blank_ok else 'FAIL'} (HTTP {resp_blank.status_code})")
+
+    # Markdown/URL/emoji must be stripped before synthesis.
+    from backend.voice.tts import clean_text  # noqa: PLC0415
+
+    cleaned = clean_text(str(payload["text"]))
+    clean_ok = "http" not in cleaned and "*" not in cleaned and "🎧" not in cleaned
+    print(f"  cleaning : {'OK' if clean_ok else 'FAIL'} -> {cleaned!r}")
+
+    return cache_ok and blank_ok and clean_ok
 
 
 def main() -> int:
     load_env()
-    print("Kişi 5 — ses testi (STT + TTS)")
+    print("Person 5 — voice test (STT + TTS)")
     print(f"repo: {ROOT}")
-    print("İlk çalıştırmada faster-whisper modeli indirilebilir; lütfen bekleyin...")
+    print("The first run may download the faster-whisper model; please wait...")
 
     app = FastAPI()
     app.include_router(stt_router)
@@ -264,7 +278,7 @@ def main() -> int:
         "tts": test_tts(client),
     }
 
-    print("\n=== ÖZET ===")
+    print("\n=== SUMMARY ===")
     for name, ok in results.items():
         print(f"  {'PASS' if ok else 'FAIL'}  {name}")
     return 0 if all(results.values()) else 1

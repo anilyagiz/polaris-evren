@@ -1,11 +1,16 @@
-"""SQLite bağlantı yardımcısı (Kişi 5 sahibi).
+"""Shared SQLite helper (owner: Person 5 / K5).
 
-Tek veritabanı dosyası: backend/data/assistant.db
-- Klasör yoksa oluşturulur.
-- Her modül kendi tablosunu CREATE TABLE IF NOT EXISTS ile açar.
-- backend/.env dosyasını (K3'ün main.py yüklememiş olsa bile) bir kez okur.
-- ASSISTANT_DB ortam değişkeni verilirse o dosya kullanılır; testler gerçek
-  assistant.db'yi kirletmesin diye eklenmiştir (bkz. scripts/test_tools.py).
+Single database file: ``backend/data/assistant.db``.
+- The parent folder is created on demand.
+- Every module creates its own tables with ``CREATE TABLE IF NOT EXISTS``.
+- ``backend/.env`` is parsed once into ``os.environ`` so the K5 modules work
+  standalone even when ``main.py`` does not call ``load_dotenv()``.
+- ``ASSISTANT_DB`` overrides the database path; the tests use this so they
+  never write into the demo database.
+
+NOTE for K3: if ``llm.py`` reads keys straight from ``os.environ``, call
+``backend.db.load_env()`` at the very top of ``main.py`` (before other imports
+that read configuration).
 """
 from __future__ import annotations
 
@@ -16,25 +21,22 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-# backend/ dizini ve veri yolları
+# backend/ directory and data paths
 BACKEND_DIR = Path(__file__).resolve().parent
 DATA_DIR = BACKEND_DIR / "data"
 
-#: Varsayılan veritabanı (testler ASSISTANT_DB ile başka bir dosyaya yönlendirebilir).
+#: Default database file (tests can redirect via ASSISTANT_DB).
 DB_PATH = DATA_DIR / "assistant.db"
 
 _ENV_LOADED = False
 
 
 def load_env() -> None:
-    """backend/.env dosyasını os.environ'a bir kez yükler.
+    """Load ``backend/.env`` into ``os.environ`` exactly once.
 
-    Mevcut ortam değişkenlerini ezmez (gerçek os.environ önce gelir).
-    python-dotenv'e gerek yoktur; K3 load_dotenv çağırmamış olsa bile
-    modüller tek başına çalışsın diye burada desteklenir.
-
-    DİKKAT (K3 için): K3'ün llm.py'si anahtarları okuyorsa, main.py içinde
-    `backend.db.load_env()` import sırasının en başında çağrılmalıdır.
+    Real environment variables always win; nothing already set is overwritten.
+    A tiny hand-rolled parser is used so the K5 modules have no dependency on
+    python-dotenv.
     """
     global _ENV_LOADED
     if _ENV_LOADED:
@@ -55,24 +57,23 @@ def load_env() -> None:
         key = key.strip()
         value = value.strip()
         if value[:1] in ('"', "'"):
-            # Tırnak içindeki değer aynen kalır (yorum işlemez).
+            # Quoted value: keep as-is, no comment stripping inside quotes.
             quote = value[0]
             end = value.find(quote, 1)
             value = value[1:end] if end != -1 else value[1:]
         else:
-            # Satır içi yorum: boşluk+# ile başlayan kısım atılır.
-            # Örn: STT_MODEL=small   # not  ->  "small"
-            parts = re.split(r"\s+#", value, maxsplit=1)
-            value = parts[0]
+            # Trailing comment: everything from whitespace+# onwards is dropped.
+            # e.g. STT_MODEL=small   # note  ->  "small"
+            value = re.split(r"\s+#", value, maxsplit=1)[0]
         if key and key not in os.environ:
             os.environ[key] = value.strip()
 
 
 def db_path() -> Path:
-    """Kullanılacak veritabanı dosyasını döndürür.
+    """Return the database file to use.
 
-    `ASSISTANT_DB` ortam değişkeni doluysa (mutlak veya göreli yol) o kullanılır.
-    Bu sayede testler demo veritabanına kayıt bırakmaz.
+    ``ASSISTANT_DB`` (absolute or relative) takes precedence when set, which is
+    how the test scripts stay out of the demo database.
     """
     load_env()
     override = (os.environ.get("ASSISTANT_DB") or "").strip()
@@ -82,9 +83,11 @@ def db_path() -> Path:
 
 
 def get_conn() -> sqlite3.Connection:
-    """assistant.db için bağlantı açar (klasör yoksa oluşturur).
+    """Open a connection to the assistant database, creating the folder if needed.
 
-    Kapatmayı unutma; kısa yol için session() kullan:
+    Connections are cheap: open one per operation and close it (the K5 modules
+    do this inside ``asyncio.to_thread``). Prefer ``session()`` for writes.
+
         with session() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS ...")
     """
@@ -100,15 +103,10 @@ def get_conn() -> sqlite3.Connection:
 
 @contextmanager
 def session() -> Iterator[sqlite3.Connection]:
-    """Bağlantıyı transaction ile açar; sonunda commit edip kapatır.
-
-    with session() as conn:
-        conn.execute("INSERT ...")
-    # Hata olursa rollback + close otomatik.
-    """
+    """Open a connection inside a transaction; commit on success, close always."""
     conn = get_conn()
     try:
-        with conn:  # commit / rollback
+        with conn:
             yield conn
     finally:
         conn.close()

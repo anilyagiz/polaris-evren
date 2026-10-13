@@ -1,10 +1,10 @@
-"""GEÇİCİ İSKELET — bu dosyanın sahibi Kişi 3'tür.
+"""TEMPORARY SCAFFOLD — this file is owned by Person 3 (K3).
 
-Kişi 3'ün main.py dosyası geldiğinde bunu aynen yerine koyun.
-Bu sürüm yalnızca Kişi 5 modüllerini (STT/TTS + araçlar) tek başına
-test edebilmek için oluşturuldu; /ws, orchestrator ve bridge K3'tedir.
+Replace it wholesale with K3's real main.py when it lands. This version exists
+only so the Person 5 modules (STT/TTS + tools) can be exercised standalone;
+/ws, the orchestrator and the browser bridge belong to K3.
 
-Çalıştırma (repo kökünden):
+Run from the repository root:
     uvicorn backend.main:app --reload --port 8000
 """
 from __future__ import annotations
@@ -12,19 +12,24 @@ from __future__ import annotations
 import logging
 import sys
 
-# Windows konsolu cp1252 olabilir; Türkçe loglar çökmesin.
+# The Windows console may be cp1252; keep Turkish log lines from crashing.
 if sys.stderr.encoding and sys.stderr.encoding.lower().replace("_", "-") != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# K5 tool'ları import edilerek registry'ye kaydedilir.
-from backend.tools import memory as memory_tools  # noqa: F401
-from backend.tools import reminders as reminders_tools  # noqa: F401
-from backend.tools import search as search_tools  # noqa: F401
-from backend.voice.stt import router as stt_router
-from backend.voice.tts import router as tts_router
+from backend.db import load_env
+
+# Load .env before anything reads configuration (K3's llm.py included).
+load_env()
+
+# Importing the K5 tool modules registers them in the registry.
+from backend.tools import memory as memory_tools  # noqa: E402,F401
+from backend.tools import reminders as reminders_tools  # noqa: E402,F401
+from backend.tools import search as search_tools  # noqa: E402,F401
+from backend.voice.stt import router as stt_router  # noqa: E402
+from backend.voice.tts import router as tts_router  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,7 +38,7 @@ logging.basicConfig(
 
 app = FastAPI(title="Assistant API", version="0.1")
 
-# CORS: her origin'e izin ver (chrome-extension:// dahil).
+# CORS: allow every origin, the chrome-extension:// scheme included.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,15 +47,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Ses uç noktaları (K5).
+# Voice endpoints (K5).
 app.include_router(stt_router)
 app.include_router(tts_router)
 
 
 @app.get("/health")
 async def health() -> dict[str, bool]:
-    """Sağlık kontrolü."""
+    """Liveness probe."""
     return {"ok": True}
 
 
-# K3: WebSocket /ws endpoint'i, orchestrator, bridge ve /shots buraya gelecek.
+# K3: the WebSocket /ws endpoint, orchestrator, bridge and /shots go here.

@@ -1,17 +1,21 @@
-"""POST /tts — metni mp3'e çevirir (Kişi 5 sahibi).
+"""POST /tts — turn text into an mp3 (owner: Person 5 / K5).
 
-- edge-tts, ses TTS_VOICE (varsayılan tr-TR-EmelNeural).
-- Girdi: JSON {"text"}; Çıktı: audio/mpeg
-- Markdown/URL/emoji temizlenir, metin 600 karakterle sınırlanır.
-- backend/data/tts_cache/{sha1}.mp3 önbelleği.
-- edge-tts resmî olmayan bir istemcidir ve internet ister; hata → 503
-  (panel bu durumda tarayıcı sesine geçer).
+- edge-tts, voice TTS_VOICE (default tr-TR-EmelNeural).
+- Input: JSON {"text"}; output: audio/mpeg.
+- Markdown, URLs and emoji are stripped; the text is capped at 600 characters.
+- Cache: backend/data/tts_cache/{sha1}.mp3.
+- edge-tts is an unofficial client and needs the internet. If it fails the
+  endpoint answers 503 and the panel falls back to the browser voice — that is
+  the fallback path the contract specifies, so no second server-side engine is
+  used (gTTS would pin click<8.2 and break huggingface-hub / faster-whisper).
 
-Uç nokta notu: Önce edge-tts'in kendi (DRM/Sec-MS-GEC destekli) uç noktası
-denenir. Yalnızca 403/429/ağ hatasında bir kez yedek uç nokta ile tekrarlanır.
-Böylece Microsoft tarafındaki bir sorun çalışan varsayılanı bozmaz.
+Engine order:
+  1. edge-tts against its own (DRM / Sec-MS-GEC aware) endpoint
+  2. edge-tts against a patched endpoint, only if step 1 failed. Never on
+     timeout: swapping endpoints does not fix a timeout.
+  3. 503
 
-K3 main.py'de:
+K3 wiring in main.py:
     from backend.voice.tts import router as tts_router
     app.include_router(tts_router)
 """
@@ -37,19 +41,19 @@ router = APIRouter()
 
 TTS_CACHE_DIR = DATA_DIR / "tts_cache"
 MAX_CHARS = 600
-_TTS_TIMEOUT_S = 30.0
+_ENGINE_TIMEOUT_S = 30.0
 _RETRY_SLEEP_S = 2.0
 
-# --- Metin temizleme -------------------------------------------------------
+# --- text cleaning ---------------------------------------------------------
 _URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")          # [metin](url) -> metin
-_MD_RE = re.compile(r"[*_`~#>|]+")                          # markdown işaretleri
-_LIST_RE = re.compile(r"^\s*(?:[-•]|\d+[.)])\s+", re.MULTILINE)  # madde işaretleri
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")           # [text](url) -> text
+_MD_RE = re.compile(r"[*_`~#>|]+")                           # markdown marks
+_LIST_RE = re.compile(r"^\s*(?:[-•]|\d+[.)])\s+", re.MULTILINE)  # bullet markers
 _EMOJI_RE = re.compile(
     "["
-    "\U0001F1E6-\U0001F1FF"   # bayraklar
-    "\U0001F300-\U0001FAFF"   # emoji blokları
-    "\U00002600-\U000027BF"   # semboller
+    "\U0001F1E6-\U0001F1FF"   # flags
+    "\U0001F300-\U0001FAFF"   # emoji blocks
+    "\U00002600-\U000027BF"   # symbols
     "\U00002B00-\U00002BFF"
     "\U0000FE00-\U0000FE0F"   # variation selectors
     "\U0000200D"              # zero width joiner
@@ -58,12 +62,12 @@ _EMOJI_RE = re.compile(
 
 
 class TtsRequest(BaseModel):
-    """POST /tts gövdesi."""
+    """POST /tts body."""
     text: str = Field(..., description="Seslendirilecek metin")
 
 
 def clean_text(text: str) -> str:
-    """Markdown, URL ve emoji'yi temizler; 600 karakterde keser."""
+    """Strip markdown, URLs and emoji; collapse whitespace; cap at MAX_CHARS."""
     text = _MD_LINK_RE.sub(r"\1", text)
     text = _URL_RE.sub(" ", text)
     text = _MD_RE.sub(" ", text)
@@ -88,17 +92,17 @@ _EDGE_WORKAROUND_DONE = False
 
 
 def _apply_edge_workaround() -> None:
-    """edge-tts için YEDEK uç nokta düzeltmesi (varsayılan DEĞİL, son çare).
+    """Point edge-tts at a fallback endpoint — last resort, not the default.
 
-    Microsoft, Edge "Oku" (Read Aloud) WebSocket'ini zaman zaman taşıyor ve
-    eski adrese yapılan el sıkışması 403 dönebiliyor. Bu fonksiyon **yalnızca
-    normal deneme başarısız olduğunda** çağrılır; çalışan bir kurulumu
-    bozmamak için peşinen uygulanmaz.
+    Microsoft occasionally moves the Edge "Read Aloud" websocket and the old
+    address starts answering 403. This is only called after the default
+    endpoint has already failed, so a working installation is never disturbed
+    up front.
 
-    DİKKAT: `edge_tts.communicate.WSS_URL` üzerine yazılmalı — kütüphane
-    `from .constants import WSS_URL` yaptığı için constants'taki değişiklik
-    işe yaramaz. Kütüphane güncellenirse bu fonksiyon zararsızdır.
-    Referans: https://github.com/rany2/edge-tts/issues/490
+    NOTE: ``edge_tts.communicate.WSS_URL`` must be patched — the library does
+    ``from .constants import WSS_URL``, so changing ``constants`` has no
+    effect. Harmless on library versions that no longer need it.
+    Reference: https://github.com/rany2/edge-tts/issues/490
     """
     global _EDGE_WORKAROUND_DONE
     if _EDGE_WORKAROUND_DONE:
@@ -112,9 +116,9 @@ def _apply_edge_workaround() -> None:
             f"?Ocp-Apim-Subscription-Key={TRUSTED_CLIENT_TOKEN}"
         )
         _EDGE_WORKAROUND_DONE = True
-        logger.warning("edge-tts yedek uç noktası devreye alındı (issue #490)")
+        logger.warning("edge-tts fallback endpoint enabled (issue #490)")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("edge-tts uç noktası düzeltmesi uygulanamadı: %s", exc)
+        logger.warning("could not enable the edge-tts fallback endpoint: %s", exc)
 
 
 def _cache_path(text: str, voice: str) -> Path:
@@ -130,17 +134,19 @@ def _cleanup(path: Path) -> None:
         pass
 
 
-async def _synthesize(text: str, voice: str) -> bytes:
-    """edge-tts ile mp3 üretir; hata durumunda 503 fırlatır.
+async def _edge_attempt(text: str, voice: str, target: Path) -> None:
+    """One edge-tts synthesis into ``target``. Raises on failure."""
+    import edge_tts
 
-    Deneme sırası:
-      1) kütüphanenin kendi uç noktası (DRM/Sec-MS-GEC ile)
-      2) yalnızca 1. deneme hata verirse: yedek uç nokta
-    Zaman aşımında yedek denenmez (uç nokta değiştirmek zaman aşımını çözmez).
-    """
+    communicate = edge_tts.Communicate(text, voice)
+    await asyncio.wait_for(communicate.save(str(target)), timeout=_ENGINE_TIMEOUT_S)
+
+
+async def _synthesize(text: str, voice: str) -> bytes:
+    """Produce mp3 bytes, or raise HTTPException(503) when edge-tts cannot."""
     try:
-        import edge_tts  # noqa: PLC0415 — ağ istemcisi, ilk kullanımda
-    except ImportError as exc:  # pragma: no cover
+        import edge_tts  # noqa: F401 — probe availability before starting
+    except ImportError as exc:
         raise HTTPException(
             status_code=503,
             detail="edge-tts yüklü değil (pip install edge-tts). Panel tarayıcı sesine geçebilir.",
@@ -157,51 +163,45 @@ async def _synthesize(text: str, voice: str) -> bytes:
     for use_patched in (False, True):
         if use_patched:
             _apply_edge_workaround()
-        # Benzersiz geçici ad: aynı metin iki kez eşzamanlı istenirse
-        # iki istek aynı .tmp dosyasına yazıp bozuk mp3 üretmesin.
+        # Unique temporary name: two concurrent requests for the same text must
+        # not write over each other and produce a corrupt mp3.
         tmp = target.with_name(f"{target.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
         try:
-            communicate = edge_tts.Communicate(text, voice)
-            await asyncio.wait_for(communicate.save(str(tmp)), timeout=_TTS_TIMEOUT_S)
+            await _edge_attempt(text, voice, tmp)
             os.replace(tmp, target)
             return target.read_bytes()
         except asyncio.TimeoutError as exc:
             last_error, timed_out = exc, True
-        except Exception as exc:  # noqa: BLE001 — edge-tts resmî olmayan istemci, internet ister
+        except Exception as exc:  # noqa: BLE001 — unofficial client, needs the internet
             last_error = exc
         finally:
             _cleanup(tmp)
 
-        if timed_out or use_patched or last_error is None:
+        if timed_out or use_patched:
             break
 
         status = getattr(last_error, "status", None)
-        logger.warning(
-            "TTS ilk deneme başarısız (%s); yedek uç nokta denenecek", last_error
-        )
+        logger.warning("edge-tts first attempt failed (%s); trying the fallback endpoint", last_error)
         if status == 429:
             await asyncio.sleep(_RETRY_SLEEP_S)
 
-    if last_error is not None:
-        if timed_out:
-            logger.warning("TTS zaman aşımı (%.0f sn)", _TTS_TIMEOUT_S)
-            raise HTTPException(
-                status_code=503,
-                detail="Seslendirme zaman aşımına uğradı. Panel tarayıcı sesine geçebilir.",
-            ) from last_error
-        logger.warning("TTS hatası: %s", last_error)
+    if timed_out:
+        logger.warning("TTS timed out after %.0fs", _ENGINE_TIMEOUT_S)
         raise HTTPException(
             status_code=503,
-            detail="Seslendirme servisi şu an kullanılamıyor (edge-tts/internet). "
-                   "Panel tarayıcı sesine geçebilir.",
+            detail="Seslendirme zaman aşımına uğradı. Panel tarayıcı sesine geçebilir.",
         ) from last_error
-
-    return target.read_bytes()
+    logger.warning("TTS failed: %s", last_error)
+    raise HTTPException(
+        status_code=503,
+        detail="Seslendirme servisi şu an kullanılamıyor (edge-tts/internet). "
+               "Panel tarayıcı sesine geçebilir.",
+    ) from last_error
 
 
 @router.post("/tts")
 async def tts(payload: TtsRequest) -> Response:
-    """Metni mp3 olarak döndürür (audio/mpeg)."""
+    """Return the spoken text as audio/mpeg."""
     load_env()
     text = clean_text(payload.text)
     if not text:
@@ -209,7 +209,7 @@ async def tts(payload: TtsRequest) -> Response:
 
     voice = _voice()
     audio = await _synthesize(text, voice)
-    logger.info("TTS: %d karakter -> %d bayt (ses: %s)", len(text), len(audio), voice)
+    logger.info("TTS: %d chars -> %d bytes (voice: %s)", len(text), len(audio), voice)
     return Response(
         content=audio,
         media_type="audio/mpeg",

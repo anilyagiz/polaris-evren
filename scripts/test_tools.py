@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Kişi 5 — araç testi: web.search, memory.*, reminders.* gerçek API ile.
+"""Person 5 / K5 — tool smoke test: web.search, memory.*, reminders.* against real APIs.
 
-Her tool'u registry üzerinden bir kez çağırır ve sonucu yazdırır.
+Calls every tool once through the registry and prints the result.
 
-Kullanım:
-    python scripts/test_tools.py           # test veritabanı, sonunda silinir
-    python scripts/test_tools.py --keep    # test veritabanını silme
+Usage:
+    python scripts/test_tools.py           # uses a temporary DB, deleted afterwards
+    python scripts/test_tools.py --keep    # keep the temporary DB
 
-Test, gerçek `backend/data/assistant.db`'yi **kirletmez**: ASSISTANT_DB
-ortam değişkeni geçici bir dosyaya yönlendirilir (bkz. backend/db.py).
+The test never touches the real backend/data/assistant.db: ASSISTANT_DB points
+at a scratch file (see backend/db.py).
 
-Gerekir: backend/.env içinde BRAVE_API_KEY; internet bağlantısı.
+Requires: BRAVE_API_KEY in backend/.env and a working internet connection.
 """
 from __future__ import annotations
 
@@ -26,19 +26,19 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# Windows konsolu cp1252 olabilir; Türkçe çıktı çökmesin diye UTF-8'e çevir.
+# The Windows console may be cp1252; keep Turkish output from crashing.
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("_", "-") != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 if os.name == "nt":
-    os.system("chcp 65001 >NUL")  # konsol kod sayfası
+    os.system("chcp 65001 >NUL")
 
-# Test veritabanı: demo verisini korumak için ayrı dosya.
+# Scratch database so the demo data stays clean.
 TEST_DB = ROOT / "backend" / "data" / "test_tools.db"
 
 from backend.db import load_env  # noqa: E402
 
-# Araç modülleri import edilirken registry'ye kaydolurlar:
+# Importing the tool modules registers them in the registry:
 from backend.tools import memory, reminders, search  # noqa: E402,F401
 from backend.tools.registry import ToolContext, get  # noqa: E402
 
@@ -48,7 +48,7 @@ async def _noop_trace(step: dict) -> None:
 
 
 def make_ctx(request_id: str) -> Any:
-    """ToolContext üretir (K3'ün gerçek registry'si farklı imzaysa SimpleNamespace)."""
+    """Build a ToolContext (falls back to SimpleNamespace if K3's differs)."""
     try:
         return ToolContext(request_id=request_id)
     except TypeError:
@@ -58,14 +58,14 @@ def make_ctx(request_id: str) -> Any:
 
 
 async def call(name: str, args: dict, ctx: Any) -> dict:
-    """Tool'u registry'den bulup çağırır; hatayı dict'e çevirir."""
+    """Look a tool up in the registry and call it, converting exceptions to dicts."""
     tool = get(name)
     if tool is None:
-        return {"ok": False, "error": f"tool kayıtlı değil: {name}"}
+        return {"ok": False, "error": f"tool not registered: {name}"}
     try:
         return await tool.handler(args, ctx)
-    except Exception as exc:  # noqa: BLE001 — testte çökmesin
-        return {"ok": False, "error": f"handler exception: {exc}"}
+    except Exception as exc:  # noqa: BLE001 — the test must not crash
+        return {"ok": False, "error": f"handler raised: {exc}"}
 
 
 def check(label: str, ok: bool, detail: str = "") -> bool:
@@ -74,28 +74,28 @@ def check(label: str, ok: bool, detail: str = "") -> bool:
 
 
 def cleanup_test_db() -> None:
-    """Test veritabanı dosyalarını siler (WAL/SHM dahil)."""
+    """Delete the scratch database (WAL/SHM included)."""
     for suffix in ("", "-wal", "-shm"):
         try:
             Path(f"{TEST_DB}{suffix}").unlink(missing_ok=True)
         except OSError as exc:  # noqa: BLE001
-            print(f"  [!] test veritabanı silinemedi: {exc}")
+            print(f"  [!] could not delete the test database: {exc}")
 
 
 async def main() -> int:
-    # Gerçek assistant.db'yi kirletmemek için ayrı veritabanı (kullanıcı
-    # ASSISTANT_DB'yi kendisi verdiyse ona dokunmayız).
+    # Keep the real assistant.db clean (respect an ASSISTANT_DB the user set).
     os.environ.setdefault("ASSISTANT_DB", str(TEST_DB))
     load_env()
-    print("Kişi 5 — araç testi (web.search, memory.*, reminders.*)\n")
-    print(f"test veritabanı: {os.environ['ASSISTANT_DB']}\n")
+    print("Person 5 — tool smoke test (web.search, memory.*, reminders.*)\n")
+    print(f"test database: {os.environ['ASSISTANT_DB']}\n")
     ctx = make_ctx("test_tools")
     results: list[bool] = []
 
     # --- 1) web.search ------------------------------------------------------
-    print("[1] web.search — gerçek Brave araması")
+    print("[1] web.search — real Brave query")
     if not (os.environ.get("BRAVE_API_KEY") or "").strip():
-        results.append(check("web.search", False, "BRAVE_API_KEY yok (backend/.env)"))
+        results.append(check("web.search", False, "BRAVE_API_KEY missing (backend/.env)"))
+        results.append(check("web.search count clamped", False, "skipped (no API key)"))
     else:
         started = time.perf_counter()
         data = await call("web.search", {"query": "en iyi kablosuz kulaklık 2026", "count": 3}, ctx)
@@ -104,12 +104,18 @@ async def main() -> int:
         ok = bool(data.get("ok")) and len(items) > 0
         first = items[0] if items else {}
         ok = ok and all(key in first for key in ("title", "url", "snippet"))
-        results.append(check("web.search", ok, f"{len(items)} sonuç, {elapsed:.2f} sn"))
+        results.append(check("web.search", ok, f"{len(items)} results, {elapsed:.2f}s"))
         for item in items[:3]:
             print(f"       - {item.get('title')} | {item.get('url')}")
             print(f"         {str(item.get('snippet'))[:120]}")
         if not ok:
-            print(f"       ham yanıt: {data}")
+            print(f"       raw response: {data}")
+
+        # Over-long count must be clamped, not rejected.
+        capped = await call("web.search", {"query": "test", "count": 999}, ctx)
+        results.append(
+            check("web.search count clamped", len(capped.get("results") or []) <= 20)
+        )
 
     # --- 2) memory ----------------------------------------------------------
     print("\n[2] memory.save / memory.search / relevant")
@@ -118,19 +124,30 @@ async def main() -> int:
     save_ok = bool(saved.get("ok")) and bool(saved.get("id"))
     results.append(check("memory.save", save_ok, f"id={saved.get('id')}"))
     if not save_ok:
-        print(f"       ham yanıt: {saved}")
+        print(f"       raw response: {saved}")
 
     found = await call("memory.search", {"query": "doğum günü"}, ctx)
     items = found.get("items") or []
     search_ok = bool(found.get("ok")) and len(items) > 0
-    results.append(check("memory.search", search_ok, f"{len(items)} sonuç"))
+    results.append(check("memory.search", search_ok, f"{len(items)} results"))
     for item in items[:3]:
         print(f"       - {item.get('id')}: {str(item.get('text'))[:80]}")
     if not search_ok:
-        print(f"       ham yanıt: {found}")
+        print(f"       raw response: {found}")
+
+    # Turkish casing: a query written with the "wrong" case must still match.
+    cased = await call("memory.search", {"query": "DOĞUM GÜNÜ"}, ctx)
+    results.append(
+        check("memory.search Turkish casing", len(cased.get("items") or []) > 0)
+    )
+
+    # Stopwords alone must not return everything.
+    stop = await call("memory.search", {"query": "ve ile bir"}, ctx)
+    results.append(check("memory.search ignores stopwords", (stop.get("items") or []) == []))
 
     rel = await memory.relevant("doğum günü", k=3)
-    results.append(check("relevant()", len(rel) > 0, f"{len(rel)} metin"))
+    results.append(check("relevant()", len(rel) > 0, f"{len(rel)} texts"))
+    results.append(check("relevant() never raises", await memory.relevant("") == []))
 
     # --- 3) reminders -------------------------------------------------------
     print("\n[3] reminders.add / list / due")
@@ -139,7 +156,10 @@ async def main() -> int:
         {"text": "geçmiş zaman", "due_iso": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()},
         ctx,
     )
-    results.append(check("geçmiş zaman reddedildi", past.get("ok") is False, str(past.get("error"))))
+    results.append(check("past time rejected", past.get("ok") is False, str(past.get("error"))))
+
+    bad = await call("reminders.add", {"text": "bozuk", "due_iso": "yarın sabah"}, ctx)
+    results.append(check("invalid date rejected", bad.get("ok") is False, str(bad.get("error"))))
 
     tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
     added = await call(
@@ -154,34 +174,36 @@ async def main() -> int:
     listed_items = listed.get("items") or []
     sample_item = listed_items[0] if listed_items else {}
     list_ok = bool(listed.get("ok")) and all(k in sample_item for k in ("id", "text", "due_iso"))
-    results.append(check("reminders.list", list_ok, f"{len(listed_items)} kayıt"))
+    results.append(check("reminders.list", list_ok, f"{len(listed_items)} pending"))
     if listed_items:
-        print(f"       due_iso örneği (yerel saat): {sample_item.get('due_iso')}")
+        print(f"       due_iso example (local time): {sample_item.get('due_iso')}")
 
-    # due(): 2 sn sonra dolacak bir hatırlatıcı, bir kez dönmeli
+    # due(): a reminder 2 s out must be returned exactly once.
     soon = datetime.now(timezone.utc) + timedelta(seconds=2)
     await call("reminders.add", {"text": "kısa süreli test", "due_iso": soon.isoformat()}, ctx)
-    print("       due() için 2.5 sn bekleniyor...")
+    print("       waiting 2.5s for due()...")
     await asyncio.sleep(2.5)
     first_due = await reminders.due()
     second_due = await reminders.due()
     short_ids = [r["id"] for r in first_due if r["text"] == "kısa süreli test"]
     again_ids = [r["id"] for r in second_due if r["text"] == "kısa süreli test"]
     due_ok = len(short_ids) == 1 and len(again_ids) == 0
-    results.append(check("due() bir kez döndürdü", due_ok,
-                         f"ilk: {len(first_due)} kayıt, ikinci: {len(second_due)} kayıt"))
+    results.append(check("due() returns once", due_ok,
+                         f"first: {len(first_due)}, second: {len(second_due)}"))
 
-    # --- Özet ---------------------------------------------------------------
-    print("\n=== ÖZET ===")
+    # --- summary ------------------------------------------------------------
+    print("\n=== SUMMARY ===")
     names = [
-        "web.search", "memory.save", "memory.search", "relevant()",
-        "geçmiş zaman reddedildi", "reminders.add", "reminders.list", "due() bir kez döndürdü",
+        "web.search", "web.search count clamped", "memory.save", "memory.search",
+        "memory.search Turkish casing", "memory.search ignores stopwords",
+        "relevant()", "relevant() never raises", "past time rejected",
+        "invalid date rejected", "reminders.add", "reminders.list", "due() returns once",
     ]
-    for name, ok in zip(names, results, strict=False):
+    for name, ok in zip(names, results, strict=True):
         print(f"  {'PASS' if ok else 'FAIL'}  {name}")
 
     if "--keep" in sys.argv:
-        print(f"\n  test veritabanı korundu: {TEST_DB}")
+        print(f"\n  test database kept: {TEST_DB}")
     else:
         cleanup_test_db()
     return 0 if all(results) else 1

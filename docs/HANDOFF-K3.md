@@ -91,3 +91,24 @@ değerlendiriyoruz — K3 kontrol etsin.
 - Başarılı dönüşler `{"ok": true, ...}` ile sözleşmedeki alanları içerir
   (örn. `{"ok": true, "results": [...]}`) — sözleşmenin üst kümesi.
 - Tool adları LLM'e `browser__click` biçiminde gidecekse çevrimi **K3** yapar.
+
+## 7. K5 tool katmanı birleştirildi — K3'ün bilmesi gereken farklar
+
+K5'in ilk sürümü ile `k5-voice` branch'indeki bağımsız sürüm birleştirildi.
+Dış sözleşme (tool adları, argümanlar, `risk`) **değişmedi**, ama iç detaylar
+netleşti:
+
+| Konu | Yeni davranış | K3 ne yapmalı |
+|---|---|---|
+| `id` tipleri | `memory.*` ve `reminders.*` artık **tamsayı** id döndürür (`INTEGER PRIMARY KEY`) | id'yi opak kabul et; string varsayımı yapma |
+| `reminders.list` | Sadece **henüz bildirilmemiş** kayıtları döndürür | Zamanı geçmiş kayıt listede görünmez, panik yapma |
+| `memory.relevant` | **Asla exception fırlatmaz**, hata durumunda `[]` döner | Sarmalamana gerek yok |
+| DB erişimi | Tüm DB çağrıları `asyncio.to_thread` içinde; event loop bloklanmaz | — |
+| `due()` | `BEGIN IMMEDIATE` ile atomik; `--workers > 1` altında da çift bildirim olmaz | 30 sn döngü güvenli |
+| Eski veritabanı | `memories`/`reminders` eski şemadaysa **ilk kullanımda otomatik göç eder** (`id TEXT` → `INTEGER`, `text_norm` eklenir) | Bir defalık yavaşlık normal, log'da `rebuilding the table` görünür |
+| `web.search` `count` | 1–20 arası kabul eder (Brave limiti), fazlası kırpılır | — |
+| Brave hataları | 429, 401/403 ve **422 `SUBSCRIPTION_TOKEN_INVALID`** ayrı ayrı anlaşılır mesaja çevrilir | — |
+| TTS motoru | **Sadece edge-tts.** `gTTS` denendi ama `click<8.2` isterken `huggingface-hub` `click>=8.4.2` istiyor; ikisi aynı ortamda çalışmıyor | `gTTS` eklemeye çalışma |
+
+`docs/README.md` §7'de bu maddelerin kullanıcıya dönük karşılıkları var.
+
