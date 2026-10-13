@@ -23,7 +23,8 @@ Route = Literal["chat", "web_search", "browser_task", "desktop_task", "personal"
 #: A click on an element whose label matches this pattern always needs the
 #: user's explicit confirmation, even though the tool itself is "safe".
 RISKY_PATTERN = re.compile(
-    r"gönder|satın|öde|sipariş|sil|onayla|submit|buy|pay|order|delete|send|confirm",
+    r"gönder|satın|öde|sipariş|sil|onayla|kaydet|iptal|abone|kaldır|transfer|havale|"
+    r"submit|buy|pay|order|delete|send|confirm|purchase|checkout|subscribe|remove|cancel|transfer|withdraw",
     re.IGNORECASE,
 )
 
@@ -263,6 +264,24 @@ def needs_confirm(tool: Tool, args: dict[str, Any], snapshot: dict[str, Any] | N
     if is_risky_label(label):
         shown = (label or "").strip()[:80]
         return f"“{shown}” öğesine tıklanmasını onaylıyor musun?"
+    return None
+
+
+#: Labels/roles of fields the assistant must never type into (PROTOCOL section 1).
+_SECRET_FIELD = re.compile(r"password|passwd|parola|şifre|sifre|cvv|cvc|kart\s*no|card\s*number", re.IGNORECASE)
+
+
+def blocked_reason(tool: Tool, args: dict[str, Any], snapshot: dict[str, Any] | None) -> str | None:
+    """Hard refusal (no confirmation possible): typing into password/card fields."""
+
+    if tool.name != "browser.type":
+        return None
+    element = find_element(snapshot, args.get("ref"))
+    if element is None:
+        return None
+    haystack = " ".join(str(element.get(k) or "") for k in ("role", "name", "type", "autocomplete"))
+    if _SECRET_FIELD.search(haystack):
+        return "Şifre/kart alanlarına yazmak güvenlik nedeniyle engellendi."
     return None
 
 

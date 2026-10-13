@@ -107,3 +107,29 @@ LLM'e giden biçim: `[5] text "Edit"`.
 | Tıklama yanlış yere gidiyor | Ekran boyutu değişmiş olabilir; log'daki "Sandbox screen size" satırına bakın, yeni `desktop.snapshot` alın. |
 | OCR öğe bulmuyor / yavaş | `rapidocr-onnxruntime` kurulu mu? Hedef: snapshot < 2 sn (ölçülen: ~0,8 sn, 1280×800, CPU). |
 | `/shots/...` 404 | Dosya `backend/data/shots/` altında mı? Ad yalnızca `[A-Za-z0-9_-].png` olabilir. |
+
+## 8. Demo modu: DESKTOP_FAKE=1 (Docker gerekmez)
+
+Docker kurulu değilse ya da sahnede sorun çıkarsa, Pillow ile çizilmiş sahte bir masaüstü (basit "Metin Düzenleyici") kullanılır. Tüm akış (snapshot -> numaralı öğeler -> click/type/key/scroll -> `/shots/...` -> zaman çizelgesi) gerçek gibi çalışır; OCR bile gerekmez.
+
+`backend/.env`:
+
+```
+CUA_ENABLED=true
+DESKTOP_FAKE=1
+```
+
+Doğrulama: `python scripts/cua_smoke.py` (DESKTOP_FAKE=1 iken sahte oturumu kullanır) ve `python -m pytest tests/cua -q`.
+Sahte ekranda tıklanabilir öğeler: Dosya, Düzenle, Görünüm, Kaydet (durum çubuğunu "Kaydedildi" yapar), metin alanı (tıklayınca odaklanır, `desktop.type` metin ekler).
+
+## 9. Doğrulama kontrol listesi
+
+1. `docker version` ve `docker run --rm hello-world` çalışıyor.
+2. `python scripts/cua_smoke.py` -> `backend/data/shots/` altında png'ler.
+3. Backend açılışında log: "Kayıtlı araçlar" içinde `desktop.click, desktop.key, desktop.scroll, desktop.snapshot, desktop.type`.
+4. Tarayıcıdan `http://localhost:8000/shots/<dosya>.png` görüntü döner; geçersiz ad 404 verir.
+
+## 10. Yedek plan
+
+- Docker/WSL2 çalışmazsa: `DESKTOP_FAKE=1` ile demo, ya da `CUA_ENABLED=false` (backend masaüstü araçları olmadan açılır; paketler eksik olsa bile çökmez, araç Türkçe hata döner).
+- Zaman kalmazsa (PROTOCOL §9, 6. saat): CUA demosunu ekran kaydı olarak çek, canlı demoda tarayıcı senaryolarına odaklan.

@@ -13,7 +13,7 @@ from typing import Any, cast
 
 from ..llm import Usage
 from ..trace import EmitFn, Verdict
-from .base import BaseAgent, HistoryEntry, JudgeVerdict, Plan, render_snapshot
+from .base import BaseAgent, build_context_block, HistoryEntry, JudgeVerdict, Plan, render_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,9 @@ class JudgeAgent(BaseAgent):
         usage: Usage | None = None
         started = time.perf_counter()
         try:
-            data, usage = await self.complete_json(messages, temperature=0.0)
+            data, usage = await self.complete_json(
+                messages, temperature=0.0, context_block=build_context_block()
+            )
             verdict = self._parse(data)
         except Exception as exc:  # noqa: BLE001 - the judge must never break a request
             # LLMError, or a malformed provider response (IndexError/KeyError):

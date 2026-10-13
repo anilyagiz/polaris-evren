@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from openai import APIError, AsyncOpenAI
+from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
 
 try:  # openai<2 exported AsyncTimeout; openai>=2 renamed it to APITimeoutError
     from openai import AsyncTimeout  # type: ignore[attr-defined]
@@ -73,6 +73,40 @@ class ToolMessage:
     tool_calls: list[ToolCall] = field(default_factory=list)
 
 
+_MAX_CALL_ATTEMPTS = 3
+_BACKOFF_S = (0.6, 1.5)
+
+
+def _is_transient(exc: Exception) -> bool:
+    if isinstance(exc, (AsyncTimeout, asyncio.TimeoutError, APIConnectionError)):
+        return True
+    status = getattr(exc, "status_code", None)
+    if isinstance(exc, APIStatusError) or isinstance(status, int):
+        return status == 429 or (isinstance(status, int) and status >= 500)
+    return False
+
+
+def _describe_error(exc: Exception | None) -> str:
+    """Turkish, user-presentable explanation of a failed LLM call."""
+
+    if exc is None:
+        return "LLM çağrısı başarısız."
+    status = getattr(exc, "status_code", None)
+    if isinstance(exc, (AsyncTimeout, asyncio.TimeoutError)):
+        return "LLM zaman aşımına uğradı; biraz sonra tekrar dene."
+    if isinstance(exc, APIConnectionError):
+        return "LLM sunucusuna bağlanılamadı; DEEPSEEK_BASE_URL ve internet bağlantını kontrol et."
+    if status in (401, 403):
+        return "LLM kimlik doğrulaması reddedildi; DEEPSEEK_API_KEY değerini kontrol et."
+    if status == 404:
+        return "LLM adresi veya modeli bulunamadı; DEEPSEEK_BASE_URL ve LLM_MODEL değerlerini kontrol et."
+    if status == 429:
+        return "LLM istek sınırına takıldı (429); biraz bekleyip tekrar dene."
+    if isinstance(status, int) and status >= 500:
+        return f"LLM sunucusu geçici hata verdi ({status}); biraz sonra tekrar dene."
+    return f"LLM çağrısı başarısız: {exc}"
+
+
 _RETRY_HINT = "Sadece geçerli JSON döndür. Açıklama, markdown veya kod bloğu ekleme."
 
 
@@ -96,17 +130,30 @@ class LLMClient:
     # -- plumbing ---------------------------------------------------------
     @property
     def configured(self) -> bool:
-        return bool(self.api_key)
+        return self.config_problem() is None
+
+    def config_problem(self) -> str | None:
+        """Turkish description of what is missing, or None when usable."""
+
+        if not (self.api_key or "").strip():
+            return "DEEPSEEK_API_KEY tanımlı değil; backend/.env dosyasını doldur."
+        base = (self.base_url or "").strip()
+        if not base.startswith(("http://", "https://")):
+            return "DEEPSEEK_BASE_URL geçersiz veya boş (http:// ya da https:// ile başlamalı); backend/.env dosyasını kontrol et."
+        if not (self.model or "").strip():
+            return "LLM_MODEL tanımlı değil; backend/.env dosyasında modeli (örn. deepseek-chat) belirt."
+        return None
 
     def _sdk(self) -> AsyncOpenAI:
-        if not self.api_key:
-            raise LLMError("DEEPSEEK_API_KEY tanımlı değil; backend/.env dosyasını doldur.")
+        problem = self.config_problem()
+        if problem:
+            raise LLMError(problem)
         if self._client is None:
             self._client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
                 timeout=self.timeout_s,
-                max_retries=1,
+                max_retries=0,  # retries/backoff are handled in _create
             )
         return self._client
 
@@ -135,6 +182,25 @@ class LLMClient:
             finish_reason=finish,
         )
 
+    # -- resilient call ---------------------------------------------------
+    async def _create(self, **kwargs: Any) -> Any:
+        """One completion call with small backoff on 429/5xx/timeouts/connection errors."""
+
+        last: Exception | None = None
+        for attempt in range(_MAX_CALL_ATTEMPTS):
+            try:
+                return await self._sdk().chat.completions.create(**kwargs)
+            except LLMError:
+                raise
+            except (APIError, AsyncTimeout, asyncio.TimeoutError) as exc:
+                last = exc
+                if not _is_transient(exc) or attempt == _MAX_CALL_ATTEMPTS - 1:
+                    break
+                delay = _BACKOFF_S[min(attempt, len(_BACKOFF_S) - 1)]
+                logger.warning("LLM geçici hata (deneme %s), %.1f sn sonra tekrar: %s", attempt + 1, delay, exc)
+                await asyncio.sleep(delay)
+        raise LLMError(_describe_error(last)) from last
+
     # -- entry points -----------------------------------------------------
     async def chat_json(
         self,
@@ -151,24 +217,19 @@ class LLMClient:
         for attempt in range(2):
             attempts += 1
             started = time.perf_counter()
-            try:
-                response = await self._sdk().chat.completions.create(
-                    model=self.model,
-                    messages=payload,  # type: ignore[arg-type]
-                    temperature=temperature,
-                    response_format={"type": "json_object"},
-                )
-            except (APIError, AsyncTimeout, asyncio.TimeoutError) as exc:
-                last_error = exc
-                logger.warning("LLM json call failed (attempt %s): %s", attempt + 1, exc)
-                if attempt == 0:
-                    await asyncio.sleep(0.6)
-                    continue
-                raise LLMError(f"LLM çağrısı başarısız: {exc}") from exc
+            response = await self._create(
+                model=self.model,
+                messages=payload,
+                temperature=temperature,
+                response_format={"type": "json_object"},
+            )
 
             latency_ms = int((time.perf_counter() - started) * 1000)
             usage = self._usage(response, self.model, latency_ms, attempts)
-            content = (response.choices[0].message.content or "").strip()
+            try:
+                content = (response.choices[0].message.content or "").strip()
+            except (IndexError, AttributeError, TypeError) as exc:
+                raise LLMError(f"Model boş/bozuk yanıt döndürdü: {exc}") from exc
             try:
                 return _loads_lenient(content), usage
             except json.JSONDecodeError as exc:
@@ -202,15 +263,14 @@ class LLMClient:
         if tools:
             kwargs["tools"] = list(tools)
             kwargs["tool_choice"] = "auto"
-        try:
-            response = await self._sdk().chat.completions.create(**kwargs)
-        except (APIError, AsyncTimeout, asyncio.TimeoutError) as exc:
-            logger.warning("LLM tool call failed: %s", exc)
-            raise LLMError(f"LLM çağrısı başarısız: {exc}") from exc
+        response = await self._create(**kwargs)
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         usage = self._usage(response, self.model, latency_ms, 1)
-        message = response.choices[0].message
+        try:
+            message = response.choices[0].message
+        except (IndexError, AttributeError, TypeError) as exc:
+            raise LLMError(f"Model boş/bozuk yanıt döndürdü: {exc}") from exc
         calls: list[ToolCall] = []
         for raw in message.tool_calls or []:
             name = getattr(getattr(raw, "function", None), "name", None) or "unknown"
@@ -233,14 +293,16 @@ class LLMClient:
 
 
 def _loads_lenient(content: str) -> dict[str, Any]:
-    """Parse JSON, tolerating ```json fences the model sometimes adds."""
+    """Parse JSON, tolerating code fences and prose around the object."""
+
+    import re
 
     text = content.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
-    text = text.strip()
+    fence = re.search(r"```(?:json|JSON)?\s*(.*?)```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    elif text.startswith("```"):
+        text = text.split("\n", 1)[-1].strip()
     try:
         data = json.loads(text)
     except json.JSONDecodeError:

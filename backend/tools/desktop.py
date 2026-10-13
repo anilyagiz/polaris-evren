@@ -11,8 +11,6 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from backend.cua.perceive import perceive
-from backend.cua.session import get_session
 from backend.tools.registry import Tool, ToolContext, register
 
 logger = logging.getLogger(__name__)
@@ -23,6 +21,13 @@ REF_NOT_FOUND = "ref bulunamadı, önce desktop.snapshot çağır"
 # ref -> element from the most recent desktop.snapshot (shared by the single desktop session)
 _elements: dict[int, dict] = {}
 _shot_counter: defaultdict[str, int] = defaultdict(int)
+
+
+def get_session():
+    """Lazy: CUA/Pillow/OCR imports must never break backend startup."""
+    from backend.cua.session import get_session as _get
+
+    return _get()
 
 
 def cua_enabled() -> bool:
@@ -48,19 +53,16 @@ def _parse_ref(args: dict) -> int | None:
 
 
 async def _emit_snapshot_trace(ctx: ToolContext, snapshot: dict, latency_ms: int) -> None:
-    step = {
-        "agent": "executor",
-        "decision": f"Masaüstü ekran görüntüsü alındı ({len(snapshot['elements'])} öğe)",
-        "why": "Masaüstünde ne olduğunu görmek için ekran metne çevrildi; numaralar tıklanabilir öğeleri gösterir.",
-        "evidence": [f"shot:{snapshot['shot']}"],
-        "confidence": None,
-        "tool": {"name": "desktop.snapshot", "args": {}},
-        "scores": None,
-        "verdict": None,
-        "latency_ms": latency_ms,
-        "tokens": None,
-        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
-    }
+    from backend.trace import make_step
+
+    step = make_step(
+        "executor",
+        f"Masaüstü ekran görüntüsü alındı ({len(snapshot['elements'])} öğe)",
+        "Masaüstünde ne olduğunu görmek için ekran metne çevrildi; numaralar tıklanabilir öğeleri gösterir.",
+        evidence=[f"shot:{snapshot['shot']}"],
+        tool={"name": "desktop.snapshot", "args": {}},
+        latency_ms=latency_ms,
+    )
     try:
         await ctx.emit_trace(step)
     except Exception:
@@ -70,16 +72,29 @@ async def _emit_snapshot_trace(ctx: ToolContext, snapshot: dict, latency_ms: int
 async def _snapshot(args: dict, ctx: ToolContext) -> dict:
     started = time.perf_counter()
     try:
-        png = await get_session().screenshot()
+        from backend.cua.perceive import perceive
+
+        session = get_session()
+        png = await session.screenshot()
         _shot_counter[ctx.request_id] += 1
-        snapshot = await perceive(png, ctx.request_id, _shot_counter[ctx.request_id])
+        known = getattr(session, "known_elements", None)  # fake desktop: skip OCR
+        snapshot = await perceive(
+            png, ctx.request_id, _shot_counter[ctx.request_id], boxes=known() if known else None
+        )
+    except ImportError as exc:
+        logger.warning("desktop.snapshot: eksik paket: %s", exc)
+        return {
+            "ok": False,
+            "error": "Masaüstü özelliği için gerekli paketler kurulu değil "
+            f"({exc.name or exc}). docs/cua-setup.md dosyasına bak ya da DESKTOP_FAKE=1 kullan.",
+        }
     except Exception as exc:
         logger.exception("desktop.snapshot failed")
         return {"ok": False, "error": f"Masaüstü görüntüsü alınamadı: {exc}"}
     _elements.clear()
     _elements.update({el["ref"]: el for el in snapshot["elements"]})
     await _emit_snapshot_trace(ctx, snapshot, int((time.perf_counter() - started) * 1000))
-    return snapshot
+    return {"ok": True, "data": snapshot}  # snapshot includes "shot": "/shots/{request_id}_{n}.png"
 
 
 async def _click(args: dict, ctx: ToolContext) -> dict:
@@ -188,9 +203,21 @@ TOOLS = [
     ),
 ]
 
-if cua_enabled():
-    for _tool in TOOLS:
-        register(_tool)
-    logger.info("CUA enabled: %d desktop tools registered", len(TOOLS))
-else:
-    logger.info("CUA disabled (CUA_ENABLED=false): desktop tools not registered")
+_registered = False
+
+
+def register_desktop_tools() -> bool:
+    """Register desktop.* tools; clean no-op when CUA_ENABLED is false. Idempotent."""
+    global _registered
+    if not cua_enabled():
+        logger.info("CUA disabled (CUA_ENABLED=false): desktop tools not registered")
+        return False
+    if not _registered:
+        for tool in TOOLS:
+            register(tool)
+        _registered = True
+        logger.info("CUA enabled: %d desktop tools registered", len(TOOLS))
+    return True
+
+
+register_desktop_tools()

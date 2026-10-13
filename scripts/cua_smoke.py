@@ -55,7 +55,8 @@ async def smoke_real() -> None:
         print(f"[shot] smoke_2_raw.png ({len(png)} bayt)")
 
         started = time.perf_counter()
-        snapshot = await perceive(png, "smoke", 2)
+        known = getattr(session, "known_elements", None)  # DESKTOP_FAKE=1: no OCR
+        snapshot = await perceive(png, "smoke", 2, boxes=known() if known else None)
         print(f"[perceive] {len(snapshot['elements'])} öğe, {time.perf_counter() - started:.2f}s -> {snapshot['shot']}")
         print(format_for_llm(snapshot)[:1500])
     finally:
@@ -166,8 +167,8 @@ async def smoke_offline() -> None:
         traces.append(step)
 
     ctx = registry.ToolContext(request_id="r_tools", bridge=None, tab=None, emit_trace=emit)
-    snap = await registry.get("desktop.snapshot").handler({}, ctx)
-    assert snap["source"] == "desktop" and traces and traces[0]["evidence"][0].startswith("shot:/shots/r_tools_1")
+    snap = (await registry.get("desktop.snapshot").handler({}, ctx))["data"]
+    assert snap["source"] == "desktop" and traces and traces[0].evidence[0].startswith("shot:/shots/r_tools_1")
     print(f"[tools] desktop.snapshot -> {len(snap['elements'])} öğe, trace evidence {traces[0]['evidence']}")
 
     target = next(e for e in snap["elements"] if e["name"].startswith("File"))

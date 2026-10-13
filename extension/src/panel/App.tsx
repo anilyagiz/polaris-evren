@@ -13,7 +13,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { executeBrowserTool } from "virtual:panel-browser-tool";
+import { executeBrowserTool } from "../bridge/executeTool";
 import {
   ConfirmModal,
   Markdown,
@@ -499,12 +499,6 @@ export default function App() {
         <div className="mock-banner">
           <Sparkles size={13} />
           <span>Demo modu · Örnek verilerle çalışıyor</span>
-        </div>
-      )}
-      {!settings.mock && !__BROWSER_BRIDGE_READY__ && (
-        <div className="notice small">
-          Tarayıcı köprüsü henüz hazır değil. Kişi 2’nin dosyası eklendikten
-          sonra yeniden derle.
         </div>
       )}
       {notification && (

@@ -178,6 +178,7 @@ async function resolveTab(tabId?: number): Promise<chrome.tabs.Tab> {
     { active: true, currentWindow: true, windowType: "normal" },
     { active: true, windowType: "normal" },
   ];
+  let fallback: chrome.tabs.Tab | undefined;
   for (const query of queries) {
     let tabs: chrome.tabs.Tab[] = [];
     try {
@@ -185,10 +186,19 @@ async function resolveTab(tabId?: number): Promise<chrome.tabs.Tab> {
     } catch {
       continue;
     }
-    const match = tabs.find(isUsableTab);
-    if (match !== undefined) {
-      return match;
+    const usable = tabs.filter(isUsableTab);
+    // Prefer a real web page, most recently used first (panel may live in
+    // another window than the page the user is talking about).
+    const web = usable
+      .filter((tab) => /^https?:/i.test(tab.url ?? ""))
+      .sort((x, y) => (y.lastAccessed ?? 0) - (x.lastAccessed ?? 0))[0];
+    if (web !== undefined) {
+      return web;
     }
+    fallback ??= usable[0];
+  }
+  if (fallback !== undefined) {
+    return fallback;
   }
   throw new Error("Sürülebilir sekme yok, kullanıcıdan bir sayfa açmasını iste");
 }

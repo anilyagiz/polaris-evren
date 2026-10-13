@@ -11,9 +11,9 @@ import App from "./App";
 import { ConfirmModal, Markdown } from "./components";
 import { createMockTransport } from "./mocks/session";
 import type { ServerEvent } from "./protocol";
-import { executeBrowserTool } from "virtual:panel-browser-tool";
+import { executeBrowserTool } from "../bridge/executeTool";
 
-vi.mock("virtual:panel-browser-tool", () => ({
+vi.mock("../bridge/executeTool", () => ({
   executeBrowserTool: vi.fn(async () => ({
     ok: true,
     data: { ok: true },

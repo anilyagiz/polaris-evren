@@ -18,7 +18,7 @@ import re
 import httpx
 
 from backend import db
-from backend.tools.registry import Tool, ToolContext, register
+from backend.tools.registry import Tool, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def web_search(query: str, count: int = DEFAULT_COUNT) -> dict:
         return {"ok": False, "error": "Web araması yapılandırılmamış: BRAVE_API_KEY eksik."}
 
     headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
-    params = {"q": query, "count": count}
+    params = {"q": query[:400], "count": count}  # Brave rejects queries over 400 chars
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
             response = await client.get(BRAVE_URL, headers=headers, params=params)
@@ -65,8 +65,9 @@ async def web_search(query: str, count: int = DEFAULT_COUNT) -> dict:
         return {"ok": False, "error": f"Arama servisi hata döndürdü (HTTP {response.status_code})."}
 
     try:
-        items = response.json().get("web", {}).get("results", [])
-    except ValueError:
+        payload = response.json()
+        items = (payload.get("web") or {}).get("results") or []
+    except (ValueError, AttributeError):
         return {"ok": False, "error": "Arama servisinden geçersiz yanıt alındı."}
 
     results = [
@@ -76,7 +77,7 @@ async def web_search(query: str, count: int = DEFAULT_COUNT) -> dict:
             "snippet": strip_html(item.get("description", "")),
         }
         for item in items[:count]
-        if item.get("url")
+        if isinstance(item, dict) and item.get("url")
     ]
     logger.info("web.search: %r -> %d results", query, len(results))
     return {"ok": True, "results": results}
@@ -94,7 +95,7 @@ async def _handle_search(args: dict, ctx: ToolContext) -> dict:
     return await web_search(query, max(1, min(count, MAX_COUNT)))
 
 
-register(
+db.register_once(
     Tool(
         name="web.search",
         description="Brave Search ile internette arama yapar; her sonuç için başlık, URL ve kısa özet döndürür. "

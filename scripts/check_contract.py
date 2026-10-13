@@ -291,6 +291,11 @@ def check_route_tools() -> Result:
     except Exception as exc:
         return Result("FAIL", [f"backend.tools.registry içe aktarılamadı: {exc!r}"])
 
+    for _mod in ("browser", "desktop", "search", "memory", "reminders"):
+        try:
+            importlib.import_module(f"backend.tools.{_mod}")
+        except Exception:  # missing K4/K5 module -> reported as warning below
+            pass
     registered = {tool.name for tool in registry.all_tools()}
     problems: list[str] = []
     warnings: list[str] = []

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import json
 import logging
 import secrets
 import time
@@ -158,6 +159,13 @@ def _normalise_result(tool: Tool, result: dict[str, Any]) -> dict[str, Any]:
     """
 
     if "ok" in result:
+        if result.get("ok") and "data" not in result:
+            # PROTOCOL section 7 tools (web.search, memory.*, reminders.*, desktop.*)
+            # return flat payloads such as {"ok": True, "results": [...]}.  Move the
+            # payload under "data" so the executor/judge/responder see it.
+            payload = {k: v for k, v in result.items() if k not in ("ok", "error")}
+            if payload:
+                return {"ok": True, "data": payload, "error": None}
         return result
     if "elements" in result or "source" in result:
         logger.warning(
@@ -299,6 +307,16 @@ class Orchestrator:
                 await self._send({"type": "notify", "text": text, "spoken": spoken})
             except Exception as exc:
                 logger.info("notify gönderilemedi: %s", exc)
+                # Put the reminder back so a live connection can deliver it later.
+                rid = record.get("id") if isinstance(record, dict) else None
+                if rid is not None:
+                    try:
+                        from .tools.reminders import unmark  # type: ignore[attr-defined]
+
+                        await unmark([rid])
+                    except Exception as exc2:
+                        logger.info("Hatırlatma geri alınamadı: %s", exc2)
+                return
 
     # -- frames -----------------------------------------------------------
     async def handle_frame(self, frame: dict[str, Any]) -> None:
@@ -587,6 +605,25 @@ class Orchestrator:
                 )
                 continue
 
+            blocked = registry.blocked_reason(tool, action.args, snapshot)
+            if blocked:
+                tool_calls += 1
+                log.info("Araç engellendi (%s): %s", tool.name, blocked)
+                history.append(
+                    HistoryEntry(
+                        tool=tool.name, args=action.args, ok=False, error=blocked, why=action.why
+                    )
+                )
+                await self._emit_quiet(
+                    emit,
+                    "system",
+                    "Güvenlik: işlem engellendi",
+                    blocked,
+                    tool_name=tool.name,
+                    tool_args=action.args,
+                )
+                continue
+
             # Deterministic confirmation gate: it always runs before the handler.
             confirm_summary = registry.needs_confirm(tool, action.args, snapshot)
             if confirm_summary:
@@ -605,10 +642,7 @@ class Orchestrator:
                     confirm_summary,
                     tool.name,
                     action.args,
-                    timeout=min(
-                        float(self._settings.confirm_timeout_s),
-                        max(0.0, deadline - time.monotonic()),
-                    ),
+                    timeout=float(self._settings.confirm_timeout_s),
                 )
                 if not approved:
                     log.info("Kullanıcı reddetti: %s", tool.name)
@@ -855,7 +889,14 @@ async def serve_connection(websocket: WebSocket) -> None:
 
     try:
         while True:
-            frame = await websocket.receive_json()
+            raw = await websocket.receive_text()
+            try:
+                frame = json.loads(raw)
+            except ValueError:
+                await websocket.send_json(
+                    {"type": "error", "request_id": None, "message": "Geçersiz JSON"}
+                )
+                continue
             if not isinstance(frame, dict):
                 await websocket.send_json(
                     {"type": "error", "request_id": None, "message": "Geçersiz frame."}

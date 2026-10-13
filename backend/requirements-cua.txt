@@ -1,0 +1,5 @@
+# İsteğe bağlı: masaüstü computer use (CUA_ENABLED=true). Docker Desktop + WSL2 gerekir.
+# Önce:  pip install -r backend/requirements.txt
+cua[sandbox]
+rapidocr-onnxruntime
+numpy

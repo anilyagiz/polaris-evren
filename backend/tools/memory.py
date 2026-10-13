@@ -23,7 +23,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 
 from backend import db
-from backend.tools.registry import Tool, ToolContext, register
+from backend.tools.registry import Tool, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,11 @@ def _search_sync(query: str, limit: int) -> list[dict]:
         ).fetchall()
 
     # Rank by how many keywords matched, then by recency.
-    scored = [(sum(w in row["text_norm"] for w in words), row) for row in rows]
+    phrase = " ".join(words)
+    scored = [
+        (sum(w in row["text_norm"] for w in words) * 2 + (1 if len(words) > 1 and phrase in row["text_norm"] else 0), row)
+        for row in rows
+    ]
     scored.sort(key=lambda item: (item[0], item[1]["created_at"], item[1]["id"]), reverse=True)
     return [
         {"id": row["id"], "text": row["text"], "created_at": row["created_at"]}
@@ -182,13 +186,17 @@ async def _handle_search(args: dict, ctx: ToolContext) -> dict:
     if not query:
         return {"ok": False, "error": "Arama sorgusu boş olamaz."}
     try:
-        return {"ok": True, "items": await search(query)}
+        try:
+            limit = max(1, min(int(args.get("limit") or MAX_RESULTS), 20))
+        except (TypeError, ValueError):
+            limit = MAX_RESULTS
+        return {"ok": True, "items": await search(query, limit=limit)}
     except Exception as exc:  # noqa: BLE001
         logger.exception("memory.search failed")
         return {"ok": False, "error": f"Hafızada arama yapılamadı: {exc}"}
 
 
-register(
+db.register_once(
     Tool(
         name="memory.save",
         description="Kullanıcının hatırlanmasını istediği bir bilgiyi kalıcı hafızaya kaydeder "
@@ -206,7 +214,7 @@ register(
     )
 )
 
-register(
+db.register_once(
     Tool(
         name="memory.search",
         description="Daha önce hafızaya kaydedilmiş notlarda anahtar kelimeyle arar ve en ilgili en fazla 5 notu döndürür.",

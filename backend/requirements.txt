@@ -1,19 +1,18 @@
-# requirements.txt — owned by Person 3 (K3); everyone adds their own lines.
-# Person 5 (K5) lines — 2026-10-13
-faster-whisper>=1.0.3,<2       # ctranslate2 based; revisit if 2.x changes the API
-av>=12,<19                     # faster-whisper decodes webm/opus through PyAV (no ffmpeg binary)
-edge-tts>=6.1.12,<8            # unofficial client, needs the internet; failure -> 503
-# NOTE: deliberately no gTTS. gTTS pins click<8.2 while huggingface-hub (used by
-# faster-whisper) needs click>=8.4.2, so installing both breaks model downloads.
-httpx>=0.27.2,<1               # web.search (Brave API)
-tzdata>=2024.1                 # needed for ZoneInfo("Europe/Istanbul") on Windows
-# K5 tests and the K5 routers (K3's main.py uses these too):
+# Polaris backend — çekirdek bağımlılıklar.
+# Kurulum:  python -m venv .venv ; .venv\Scripts\activate ; pip install -r backend/requirements.txt
+# Masaüstü (CUA) için ek: backend/requirements-cua.txt (isteğe bağlı, ağır)
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.6
-python-multipart>=0.0.9        # REQUIRED for the POST /stt multipart body
-# --- Person 3 (K3) lines — orchestrator, agents, browser bridge, WS ---
-openai>=1.30,<2                # DeepSeek via the OpenAI-compatible SDK
-pydantic>=2.6,<3               # agent output models + TraceStep
-python-dotenv>=1.0             # backend/.env (K5's db.load_env wins for real env vars)
-websockets>=12                 # uvicorn[standard] already pulls it; pinned for clarity
-# --- Note: nothing else to add; keep K5's lines above untouched. ---
+websockets>=12
+python-multipart>=0.0.9        # POST /stt multipart gövdesi için ZORUNLU
+openai>=1.30,<2                # DeepSeek (OpenAI uyumlu SDK)
+pydantic>=2.6,<3
+python-dotenv>=1.0
+httpx>=0.27.2,<1               # web.search (Brave API)
+tzdata>=2024.1                 # Windows'ta ZoneInfo("Europe/Istanbul") için
+pillow>=10                     # /shots ve CUA ekran görüntüsü işaretleme
+# Ses (ağır: ilk STT çağrısında model indirir)
+faster-whisper>=1.0.3,<2
+av>=12,<19                     # webm/opus çözümü (ffmpeg gerekmez)
+edge-tts>=6.1.12,<8            # internet gerekir; hata -> 503
+# NOT: gTTS bilerek yok (click sürüm çakışması: huggingface-hub ile).

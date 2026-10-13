@@ -157,4 +157,156 @@ describe("Voice boundaries", () => {
     act(() => result.current.stop());
     expect(result.current.playing).toBe(false);
   });
+
+  function mockMic() {
+    const stopTrack = vi.fn();
+    const media = {
+      getTracks: () => [{ stop: stopTrack }],
+    } as unknown as MediaStream;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: async () => media },
+    });
+    return stopTrack;
+  }
+  it("ignores recordings shorter than 400ms", async () => {
+    const stopTrack = mockMic();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+      useRecorder("http://localhost:8000", vi.fn(), vi.fn()),
+    );
+    await act(async () => {
+      await result.current.start();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+      result.current.stop();
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stopTrack).toHaveBeenCalledOnce();
+    expect(result.current.state).toBe("idle");
+  });
+  it("auto-stops after 30 seconds", async () => {
+    mockMic();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: "x" }) }),
+    );
+    const { result } = renderHook(() =>
+      useRecorder("http://localhost:8000", vi.fn(), vi.fn()),
+    );
+    await act(async () => {
+      await result.current.start();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(30001);
+      await Promise.resolve();
+    });
+    expect(result.current.state).not.toBe("recording");
+  });
+  it("opens the permission tab on NotFoundError", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          throw new DOMException("none", "NotFoundError");
+        },
+      },
+    });
+    const create = vi.fn().mockResolvedValue({});
+    vi.stubGlobal("chrome", {
+      tabs: { create },
+      runtime: { getURL: (path: string) => `chrome-extension://x/${path}` },
+    });
+    const { result } = renderHook(() =>
+      useRecorder("http://localhost:8000", vi.fn(), vi.fn()),
+    );
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(create).toHaveBeenCalledWith({
+      url: "chrome-extension://x/src/panel/permission.html",
+    });
+    expect(result.current.permissionNeeded).toBe(true);
+  });
+  it("queues TTS replies without overlapping and reports autoplay blocks", async () => {
+    const players: { play: ReturnType<typeof vi.fn>; end: () => void }[] = [];
+    class FakeAudio {
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      play = vi.fn().mockResolvedValue(undefined);
+      pause = vi.fn();
+      constructor(_url: string) {
+        players.push({ play: this.play, end: () => this.onended?.() });
+      }
+    }
+    vi.stubGlobal("Audio", FakeAudio);
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    vi.stubGlobal("speechSynthesis", { speak: vi.fn(), cancel: vi.fn(), getVoices: () => [] });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(["mp3"]),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+      useSpeaker("http://localhost:8000", vi.fn()),
+    );
+    await act(async () => {
+      void result.current.speak("bir");
+      void result.current.speak("iki");
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(players).toHaveLength(1);
+    expect(result.current.playing).toBe(true);
+    await act(async () => {
+      players[0].end();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(players).toHaveLength(2);
+    await act(async () => {
+      players[1].end();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(result.current.playing).toBe(false);
+  });
+  it("waits for a gesture when autoplay is rejected", async () => {
+    const play = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"))
+      .mockResolvedValue(undefined);
+    let ended: (() => void) | null = null;
+    class FakeAudio {
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      play = play;
+      pause = vi.fn();
+      constructor(_url: string) {
+        ended = () => this.onended?.();
+      }
+    }
+    vi.stubGlobal("Audio", FakeAudio);
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["m"]) }));
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeaker("http://localhost:8000", onError));
+    await act(async () => {
+      void result.current.speak("merhaba");
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(result.current.blocked).toBe(true);
+    expect(onError).toHaveBeenCalled();
+    await act(async () => {
+      result.current.resume();
+      await vi.advanceTimersByTimeAsync(10);
+      ended?.();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(result.current.blocked).toBe(false);
+    expect(result.current.playing).toBe(false);
+  });
 });

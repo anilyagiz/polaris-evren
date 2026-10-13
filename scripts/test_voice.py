@@ -8,6 +8,10 @@ Usage:
     python scripts/test_voice.py                 # generates the sample itself (edge-tts)
     python scripts/test_voice.py path/to/audio.webm   # use your own file
 
+Env: STT_MODEL (default small), STT_WARMUP=1 (background model load), TTS_VOICE,
+STT_CPU_THREADS. Exit code 0 = all pass. Needs internet (edge-tts) and
+faster-whisper + av. Mock-based unit tests: python -m pytest tests/voice -q
+
 Note: the first run downloads the faster-whisper model (~460 MB for "small").
 """
 from __future__ import annotations

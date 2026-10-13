@@ -6,6 +6,7 @@ Calls every tool once through the registry and prints the result.
 Usage:
     python scripts/test_tools.py           # uses a temporary DB, deleted afterwards
     python scripts/test_tools.py --keep    # keep the temporary DB
+    python scripts/test_tools.py --mock    # offline: Brave HTTP is mocked, no key needed
 
 The test never touches the real backend/data/assistant.db: ASSISTANT_DB points
 at a scratch file (see backend/db.py).
@@ -82,7 +83,33 @@ def cleanup_test_db() -> None:
             print(f"  [!] could not delete the test database: {exc}")
 
 
+def install_mock_brave() -> None:
+    """Route search.py's httpx traffic to an in-process fake Brave API."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("X-Subscription-Token") == "mock-key"
+        n = int(request.url.params.get("count", "5"))
+        results = [
+            {"title": f"<b>Sonuç</b> {i}", "url": f"https://example.com/{i}",
+             "description": f"Özet <strong>{i}</strong> &amp; devamı"}
+            for i in range(n)
+        ]
+        return httpx.Response(200, json={"web": {"results": results}})
+
+    real = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    search.httpx = SimpleNamespace(
+        AsyncClient=lambda **kw: real(transport=transport, **kw),
+        TimeoutException=httpx.TimeoutException,
+        HTTPError=httpx.HTTPError,
+    )
+    os.environ["BRAVE_API_KEY"] = "mock-key"
+
+
 async def main() -> int:
+    if "--mock" in sys.argv:
+        install_mock_brave()
     # Keep the real assistant.db clean (respect an ASSISTANT_DB the user set).
     os.environ.setdefault("ASSISTANT_DB", str(TEST_DB))
     load_env()

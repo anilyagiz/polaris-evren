@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
@@ -49,7 +50,6 @@ store = TraceStore()
 # ---------------------------------------------------------------------------
 TOOL_MODULES: tuple[str, ...] = (
     ".tools.browser",  # K3
-    ".tools.desktop",  # K4
     ".tools.search",  # K5
     ".tools.memory",  # K5
     ".tools.reminders",  # K5
@@ -76,12 +76,16 @@ def _register_tools() -> None:
 
     for module_path in TOOL_MODULES:
         _import_module(module_path)
+    if settings.cua_enabled:  # K4 desktop.* tools: optional, never fatal
+        _import_module(".tools.desktop")
     names = sorted(tool.name for tool in registry.all_tools())
     logger.info("Kayıtlı araçlar (%d): %s", len(names), ", ".join(names) or "-")
 
 
 def _include_optional_routers(target: FastAPI) -> None:
     for module_path, attr in OPTIONAL_ROUTERS:
+        if module_path == ".cua.shots_router" and not settings.cua_enabled:
+            continue
         module = _import_module(module_path)
         if module is None:
             continue
@@ -110,10 +114,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Personal Assistant Backend", version="0.1", lifespan=lifespan)
 
-# CORS: every origin, chrome-extension:// included.
+# CORS: only our extension and localhost pages.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^(chrome-extension://[a-p]{32}|https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?)$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -163,8 +167,20 @@ def _resolve_ws_handler() -> Callable[[WebSocket], Any]:
     return serve_connection
 
 
+_ALLOWED_WS_ORIGIN = re.compile(
+    r"^(chrome-extension://[a-p]{32}|https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?)$"
+)
+
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
+    # Browsers always send Origin on WebSocket handshakes; only our extension and
+    # localhost pages may drive the assistant. Non-browser clients (CLI, tests) send none.
+    origin = websocket.headers.get("origin")
+    if origin and not _ALLOWED_WS_ORIGIN.match(origin):
+        logger.warning("WS bağlantısı reddedildi (origin=%s)", origin)
+        await websocket.close(code=1008)
+        return
     handler = _resolve_ws_handler()
     try:
         await handler(websocket)

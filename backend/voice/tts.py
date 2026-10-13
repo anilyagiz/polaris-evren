@@ -213,5 +213,5 @@ async def tts(payload: TtsRequest) -> Response:
     return Response(
         content=audio,
         media_type="audio/mpeg",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": "private, max-age=3600"},
     )

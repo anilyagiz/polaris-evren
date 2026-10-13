@@ -12,7 +12,8 @@ export default defineConfig({
   define: { __BROWSER_BRIDGE_READY__: "false" },
   esbuild: { jsx: "automatic" },
   test: {
-    include: ["src/panel/**/*.test.ts", "src/panel/**/*.test.tsx"],
+    environment: "jsdom",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     restoreMocks: true,
   },
 });

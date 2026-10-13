@@ -96,9 +96,27 @@ def get_conn() -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:  # e.g. network drive / read-only: keep going
+        pass
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def register_once(tool) -> None:
+    """Register a tool unless the identical one is already in the registry.
+
+    Importing a tool module twice, or reloading it, must not log "re-registered"
+    warnings or crash. After ``registry.clear()`` the tool is registered again.
+    """
+    from backend.tools import registry
+
+    existing = registry.get(tool.name)
+    if existing is not None and existing.handler is tool.handler:
+        return
+    registry.register(tool)
 
 
 @contextmanager

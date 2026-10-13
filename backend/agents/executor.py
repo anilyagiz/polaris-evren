@@ -57,6 +57,11 @@ FINISH_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "Bu adımı neden attığını tek cümleyle açıkla.",
                 },
+                "evidence": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Sonuca dayanak olan öğeler, örn. [\"ref:21\"].",
+                },
             },
             "required": ["summary", "why"],
         },
@@ -101,7 +106,7 @@ class ExecutorAgent(BaseAgent):
             await self._emit(emit, decision="İş bitti: model çağrısı başarısız", why=summary, usage=None)
             return ExecutorAction(kind="finish", summary=summary[:MAX_SUMMARY_CHARS])
 
-        return await self._resolve(message, usage, tools, emit)
+        return await self._resolve(message, usage, tools, emit, snapshot)
 
     def context_block(self, route: str) -> str:
         return (
@@ -118,6 +123,7 @@ class ExecutorAgent(BaseAgent):
         usage: Usage,
         tools: list[Tool],
         emit: EmitFn,
+        snapshot: dict[str, Any] | None = None,
     ) -> ExecutorAction:
         call = message.tool_calls[0] if message.tool_calls else None
 
@@ -152,13 +158,15 @@ class ExecutorAgent(BaseAgent):
             # `summary` comes from the model: it may be a string, a number or an
             # object, so it is coerced instead of trusting `str.strip()`.
             summary = _as_text(message.content) or _as_text(args.get("summary")) or "İş tamamlandı."
+            evidence = _clean_evidence(args.get("evidence"))
             await self._emit(
                 emit,
                 decision=f"İş bitti: {_clip(summary, 160)}",
                 why=why or summary or DEFAULT_WHY,
                 usage=usage,
+                evidence=evidence,
             )
-            return ExecutorAction(kind="finish", summary=summary, why=why)
+            return ExecutorAction(kind="finish", summary=summary, why=why, evidence=evidence)
 
         # 4) Unknown tool for this route/registry -> safe stop with a hint.
         tool = registry.get(canonical)
@@ -174,16 +182,38 @@ class ExecutorAgent(BaseAgent):
             )
             return ExecutorAction(kind="finish", summary=summary[:MAX_SUMMARY_CHARS])
 
+        # 4b) Never invent refs: a ref absent from the latest snapshot is replaced
+        # by a snapshot refresh (the next turn then sees real refs).
+        stale = _stale_ref(tool, args, snapshot)
+        if stale is not None:
+            refresh = _snapshot_tool(tools)
+            if refresh is not None:
+                await self._emit(
+                    emit,
+                    decision=f"Araç çağrısı: {refresh.name}",
+                    why=f"ref {stale} son snapshot'ta yok; sayfayı yeniliyorum.",
+                    usage=usage,
+                    tool={"name": refresh.name, "args": {}},
+                )
+                return ExecutorAction(
+                    kind="tool", tool=refresh.name, args={},
+                    why=f"ref {stale} son snapshot'ta yok; sayfayı yeniliyorum.",
+                )
+
         # 5) Real tool call: `why` already removed, handler args stay clean.
         decision = f"Araç çağrısı: {tool.name}"
+        evidence = _ref_evidence(tool, args)
         await self._emit(
             emit,
             decision=decision,
             why=why or DEFAULT_WHY,
             usage=usage,
             tool={"name": tool.name, "args": args},
+            evidence=evidence,
         )
-        return ExecutorAction(kind="tool", tool=tool.name, args=args, why=why, summary="")
+        return ExecutorAction(
+            kind="tool", tool=tool.name, args=args, why=why, summary="", evidence=evidence
+        )
 
     async def _emit(
         self,
@@ -193,6 +223,7 @@ class ExecutorAgent(BaseAgent):
         why: str,
         usage: Usage | None,
         tool: dict[str, Any] | None = None,
+        evidence: list[str] | None = None,
     ) -> None:
         try:
             await self.emit_step(
@@ -200,6 +231,7 @@ class ExecutorAgent(BaseAgent):
                 decision=decision,
                 why=why or DEFAULT_WHY,
                 tool=tool,
+                evidence=evidence or None,
                 usage=usage,
             )
         except Exception as exc:  # tracing must never break a turn
@@ -234,6 +266,63 @@ def build_messages(
         ]
     )
     return [{"role": "user", "content": content}]
+
+
+_REF_TOOLS = {"browser.click", "browser.type", "browser.highlight", "browser.scroll",
+              "desktop.click", "desktop.type"}
+
+
+def _stale_ref(tool: Tool, args: dict[str, Any], snapshot: dict[str, Any] | None) -> Any:
+    """Return the offending ref when it is not in the snapshot, else None."""
+
+    if tool.name not in _REF_TOOLS or "ref" not in args or not snapshot:
+        return None
+    elements = snapshot.get("elements") or []
+    if not elements:
+        return None
+    known = {str(el.get("ref")) for el in elements if isinstance(el, dict)}
+    ref = args.get("ref")
+    return None if str(ref) in known else ref
+
+
+_EVIDENCE_REF_TOOLS = {"browser.click", "browser.type", "browser.read", "browser.highlight"}
+
+
+def _ref_evidence(tool: Tool, args: dict[str, Any]) -> list[str]:
+    """`ref:N` evidence for tool calls that act on a snapshot ref."""
+
+    if tool.name not in _EVIDENCE_REF_TOOLS:
+        return []
+    try:
+        return [f"ref:{int(args.get('ref'))}"]
+    except (TypeError, ValueError):
+        return []
+
+
+def _clean_evidence(value: Any) -> list[str]:
+    """Model-provided evidence: keep unique non-empty strings, ints become `ref:N`."""
+
+    if isinstance(value, (str, int)):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        text = f"ref:{item}" if isinstance(item, int) else str(item).strip()
+        if text.isdigit():
+            text = f"ref:{text}"
+        if text and text not in out:
+            out.append(text[:200])
+    return out[:10]
+
+
+def _snapshot_tool(tools: list[Tool]) -> Tool | None:
+    for candidate in tools:
+        if candidate.name in ("browser.snapshot", "desktop.snapshot"):
+            return candidate
+    return None
 
 
 def _is_finish(name: str | None) -> bool:

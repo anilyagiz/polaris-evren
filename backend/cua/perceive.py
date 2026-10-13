@@ -141,6 +141,20 @@ def to_elements(merged: list[dict]) -> list[dict]:
     ]
 
 
+def build_snapshot(png: bytes, boxes: list[dict], request_id: str, n: int) -> dict:
+    """Snapshot from already-known text boxes [{"text","bbox"}] (no OCR); saves the annotated shot."""
+    elements = to_elements(merge_lines(boxes))
+    shot = annotate(png, elements, request_id, n)
+    return {
+        "source": "desktop",
+        "url": None,
+        "title": None,
+        "elements": elements,
+        "text_excerpt": " ".join(e["name"] for e in elements)[:EXCERPT_CHARS],
+        "shot": shot,
+    }
+
+
 def _perceive_sync(png: bytes, request_id: str, n: int) -> dict:
     parser = os.getenv("DESKTOP_PARSER", "ocr").strip().lower()
     if parser == "omniparser":
@@ -164,8 +178,13 @@ def _perceive_sync(png: bytes, request_id: str, n: int) -> dict:
     }
 
 
-async def perceive(png: bytes, request_id: str, n: int) -> dict:
-    """Return a Snapshot (ORTAK BAĞLAM §7) for the screenshot and save the annotated image."""
+async def perceive(png: bytes, request_id: str, n: int, boxes: list[dict] | None = None) -> dict:
+    """Return a Snapshot (ORTAK BAĞLAM §7) for the screenshot and save the annotated image.
+
+    `boxes` (fake desktop) skips OCR.
+    """
+    if boxes is not None:
+        return await asyncio.to_thread(build_snapshot, png, boxes, request_id, n)
     return await asyncio.to_thread(_perceive_sync, png, request_id, n)
 
 

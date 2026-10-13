@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend import db
-from backend.tools.registry import Tool, ToolContext, register
+from backend.tools.registry import Tool, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def _to_utc_str(dt: datetime) -> str:
+    if dt.microsecond:  # round UP so a reminder never fires before its time
+        dt = dt.replace(microsecond=0) + timedelta(seconds=1)
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
@@ -130,7 +132,7 @@ def _list_sync() -> list[dict]:
 
 def _due_sync() -> list[dict]:
     """Select and mark due reminders atomically so nothing is notified twice."""
-    now = _to_utc_str(datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with closing(db.get_conn()) as conn:
         _ensure_schema(conn)
         # BEGIN IMMEDIATE takes the write lock up front; two pollers cannot both
@@ -169,6 +171,40 @@ async def due() -> list[dict]:
     return await asyncio.to_thread(_due_sync)
 
 
+def _unmark_sync(ids: list[int]) -> None:
+    with closing(db.get_conn()) as conn, conn:
+        _ensure_schema(conn)
+        conn.executemany("UPDATE reminders SET notified = 0 WHERE id = ?", [(int(i),) for i in ids])
+
+
+async def unmark(ids: list[int]) -> None:
+    """Make reminders pending again (use when a notify frame could not be delivered)."""
+    if ids:
+        await asyncio.to_thread(_unmark_sync, ids)
+
+
+async def start_watcher(send_notify, interval: float = 30.0) -> None:
+    """Poll due() forever and call ``await send_notify(record)`` for each reminder.
+
+    ``record`` is ``{"id", "text", "due_iso"}``. If send_notify raises, the
+    reminder is made pending again and retried on the next tick. Run it with
+    ``asyncio.create_task(start_watcher(...))`` and cancel the task on shutdown.
+    """
+    while True:
+        try:
+            for record in await due():
+                try:
+                    await send_notify(record)
+                except Exception:  # noqa: BLE001
+                    logger.warning("reminder notify failed; will retry", exc_info=True)
+                    await unmark([record["id"]])
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("reminder watcher tick failed")
+        await asyncio.sleep(interval)
+
+
 async def _handle_add(args: dict, ctx: ToolContext) -> dict:
     text = str(args.get("text") or "").strip()
     if not text:
@@ -195,7 +231,7 @@ async def _handle_list(args: dict, ctx: ToolContext) -> dict:
         return {"ok": False, "error": f"Hatırlatmalar okunamadı: {exc}"}
 
 
-register(
+db.register_once(
     Tool(
         name="reminders.add",
         description="Belirtilen zamanda kullanıcıya hatırlatma bildirimi gönderir. due_iso ISO 8601 olmalı; "
@@ -213,7 +249,7 @@ register(
     )
 )
 
-register(
+db.register_once(
     Tool(
         name="reminders.list",
         description="Henüz zamanı gelip bildirilmemiş hatırlatmaları zamana göre sıralı listeler.",

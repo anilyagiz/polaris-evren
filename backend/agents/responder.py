@@ -18,6 +18,7 @@ from .base import (
     BaseAgent,
     Citation,
     FinalAnswer,
+    build_context_block,
     HistoryEntry,
     render_snapshot,
 )
@@ -86,6 +87,7 @@ class ResponderAgent(BaseAgent):
             data, usage = await self.complete_json(
                 [{"role": "user", "content": "\n".join(lines)}],
                 temperature=TEMPERATURE,
+                context_block=build_context_block(),
             )
         except Exception as exc:  # noqa: BLE001 - the user must always get an answer
             # LLMError, or a malformed-but-"valid" provider response

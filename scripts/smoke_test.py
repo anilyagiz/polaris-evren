@@ -50,7 +50,7 @@ try:
     import openai as _openai
 except ImportError:  # pragma: no cover - openai is a declared dependency
     _openai = None
-if _openai is not None and not hasattr(_openai, "AsyncTimeout"):
+if False and _openai is not None and not hasattr(_openai, "AsyncTimeout"):  # llm.py handles openai>=2 itself
     _openai.AsyncTimeout = _openai.APITimeoutError  # type: ignore[attr-defined]
     DEPENDENCY_NOTE = (
         f"kurulu openai {_openai.__version__} 'AsyncTimeout' sunmuyor; "

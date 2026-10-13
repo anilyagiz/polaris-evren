@@ -4,6 +4,10 @@ Brave tarayıcısının **yan panelinde** çalışan; sesli, açıklanabilir (za
 tarayıcı/masaüstünü kullanabilen kişisel asistan. Bu belge sistemi **sıfırdan
 ~15 dakikada** ayağa kaldırmak için yeterlidir.
 
+> **Hızlı yol:** Tek komutla kurulum için kök [`README.md`](../README.md) ve `scripts/setup.ps1`,
+> `scripts/run-backend.ps1`, `scripts/build-extension.ps1`, `scripts/doctor.py`. Mimari: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> Bu belge ses/araç (K5) ayrıntılarını ve ölçümleri içerir.
+
 > Sahiplik: Bu README, `scripts/test_*.py`, `backend/voice/*`,
 > `backend/tools/{search,memory,reminders}.py` ve `backend/db.py` → **Kişi 5**.
 > `backend/main.py` ve `backend/tools/registry.py` şu an **geçici iskelettir**
@@ -31,8 +35,8 @@ tarayıcı/masaüstünü kullanabilen kişisel asistan. Bu belge sistemi **sıf�
 ## 2. `.env` dosyasını doldur (2 dk)
 
 ```powershell
-cd assistant\backend
-copy .env.example .env
+cd <repo-kökü>\backend
+copy .env.example .env      # veya: scripts\setup.ps1 bunu otomatik yapar
 ```
 
 `.env` içeriği ve değerler:
@@ -61,11 +65,10 @@ copy .env.example .env
 Repo **kökünden** çalıştırın (`backend` bir pakettir):
 
 ```powershell
-cd C:\Users\<sen>\assistant
-py -3.12 -m venv .venv
-.venv\Scripts\activate
-pip install -r backend\requirements.txt
-uvicorn backend.main:app --reload --port 8000
+cd <repo-kökü>
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1     # venv + paketler + .env + pnpm install
+.\scripts\run-backend.ps1                                      # uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+# elle: py -3.12 -m venv .venv ; .venv\Scripts\activate ; pip install -r backend\requirements.txt
 ```
 
 Doğrulama: tarayıcıda <http://localhost:8000/health> → `{"ok": true}`
@@ -81,9 +84,7 @@ bu normaldir, bir kez olur ve bellekte kalır (ilk çağrı ~4,8 sn; sonrakiler 
 > `vite.config.ts` ve `src/**` onlara aittir.
 
 ```powershell
-cd extension
-npm install
-npm run build        # çıktısı extension/dist
+.\scripts\build-extension.ps1   # = cd extension; pnpm install; pnpm build -> extension/dist
 ```
 
 1. Brave'de `brave://extensions` adresini aç.
@@ -165,7 +166,7 @@ sırasında `--reload` kullanmayın.
 | Hatırlatıcı 3 saat erken/geç geliyor | `tzdata` kurulu mu (`pip install tzdata`)? `TIMEZONE` çözülemezse kod sabit +03:00'a düşer ve **uyarı loglar**; UTC'ye düşmez. |
 | `ZoneInfo` hatası (reminders) | `pip install tzdata` (requirements.txt'de var). |
 | Python sürümü / pip tuhaflıkları | `py -3.12 -m venv .venv` kullan (bu demoda öyle kuruldu). Python 3.14'ten kaçın. |
-| `/ws` 404 | `/ws` WebSocket endpoint'i **Kişi 3**'tedir; şu an yalnızca ses/araç uç noktaları çalışır. |
+| `/ws` 404 | Eski sürüm kalıntısı olabilir; güncel `backend.main` `/ws`'i sunar. `python scripts\doctor.py` çalıştır. |
 | `GET /v1/models` 404 logu | Sözleşmede `/v1` proxy'si yoktur; LLM çağrıları backend içinde (K3 `llm.py`) yapılır, panel yalnızca `/ws` kullanır. |
 
 ---

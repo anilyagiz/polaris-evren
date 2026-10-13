@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "icons": "node scripts/gen-icons.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1"

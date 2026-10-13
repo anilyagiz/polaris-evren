@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import secrets
 import sys
@@ -58,7 +59,7 @@ Frame = dict[str, Any]
 SendFn = Callable[[Frame], Awaitable[None]]
 
 USAGE_HINT = 'Kullanım: python -m backend.cli "soru" [--offline] [--trace] [--json] [--tab-url URL] [--tab-title METİN] [-y]'
-NO_KEY_MESSAGE = "DEEPSEEK_API_KEY yok. backend/.env doldur ya da --offline kullan."
+NO_KEY_MESSAGE = "DEEPSEEK_API_KEY yok. backend/.env doldur ya da --offline (veya LLM_STUB=1) kullan."
 NO_ORCHESTRATOR_MESSAGE = "Orchestrator yüklenemedi: backend/orchestrator.py hazır değil."
 
 DEFAULT_URL = "https://example.com"
@@ -659,6 +660,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="LLM anahtarı olmadan çalış: sahte LLM ve sahte tarayıcı köprüsü kullanılır.",
     )
     parser.add_argument(
+        "--stub",
+        action="store_true",
+        help="--offline ile aynı (env: LLM_STUB=1).",
+    )
+    parser.add_argument(
         "--trace",
         action="store_true",
         help="Her trace adımını ayrıntılı yazdır (varsayılan: tek satır özet).",
@@ -672,7 +678,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         action="store_true",
         help="Onay kapısını otomatik onayla (riskli senaryoyu 60 sn beklemeden test eder).",
     )
-    return parser.parse_args(argv)
+    ns = parser.parse_args(argv)
+    if ns.stub or os.environ.get("LLM_STUB", "").strip().lower() in ("1", "true", "yes", "on"):
+        ns.offline = True
+    return ns
 
 
 def _force_utf8() -> None:
@@ -699,7 +708,7 @@ async def _run(args: argparse.Namespace) -> int:
     else:
         client = get_llm()
         if not client.configured:
-            print(NO_KEY_MESSAGE, flush=True)
+            print(client.config_problem() or NO_KEY_MESSAGE, "(Anahtarsız demo için --stub kullan.)", flush=True)
             return 2
 
     try:

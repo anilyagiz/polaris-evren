@@ -7,8 +7,8 @@ beklenen trace adımları, beklenen cevap ve *ters giderse* planı.
 
 ## 0. Demo öncesi kontrol listesi (5 dk önce)
 
-- [ ] `uvicorn backend.main:app --port 8000` çalışıyor → `http://localhost:8000/health` → `{"ok": true}`
-      — **`--reload` KAPALI olmalı**: reload her kod değişiminde whisper modelini yeniden yükler.
+- [ ] `.\scripts\run-backend.ps1 -NoReload` çalışıyor (`python scripts\doctor.py` hepsini özetler) → `http://localhost:8000/health` → `{"ok": true}`
+      — **`-NoReload` (reload kapalı) olmalı**: reload her kod değişiminde whisper modelini yeniden yükler.
 - [ ] `backend/.env` dolu: `DEEPSEEK_API_KEY` (evren_llm_...), `BRAVE_API_KEY`, `LLM_MODEL`, `STT_CPU_THREADS=8`
 - [ ] Extension Brave'e yüklendi, panelde backend adresi `http://localhost:8000`
 - [ ] Mikrofon izni verildi (`brave://settings/content/microphone`)
