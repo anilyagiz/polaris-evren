@@ -1,0 +1,12 @@
+# requirements.txt — Kişi 3 sahiptir (herkes kendi satırını ekler).
+# Kişi 5 (K5) satırları — 2026-10-13
+faster-whisper>=1.0.3
+av>=12,<19            # faster-whisper av.open(..., metadata_errors=...) ister; PyAV 19'da parametre kalktı
+edge-tts>=6.1.12
+httpx>=0.27.2
+tzdata>=2024.1             # Windows'ta ZoneInfo("Europe/Istanbul") için gerekli
+# K5 testleri ve K5 router'ları için (K3 main.py de bunları kullanacak):
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.6
+python-multipart>=0.0.9
+# --- Not: openai, pydantic, websockets vb. K3'ün ekleyeceği satırlardır. ---
