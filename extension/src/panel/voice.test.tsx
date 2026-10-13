@@ -146,8 +146,10 @@ describe("Voice boundaries", () => {
     const { result } = renderHook(() =>
       useSpeaker("http://localhost:8000", vi.fn()),
     );
+    let pending: Promise<void> = Promise.resolve();
     await act(async () => {
-      await result.current.speak("Merhaba");
+      pending = result.current.speak("Merhaba");
+      await vi.waitFor(() => expect(speak).toHaveBeenCalled());
     });
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/tts");
     expect(
@@ -155,6 +157,9 @@ describe("Voice boundaries", () => {
     ).toEqual({ text: "Merhaba" });
     expect(speak.mock.calls[0][0].lang).toBe("tr-TR");
     act(() => result.current.stop());
+    await act(async () => {
+      await pending;
+    });
     expect(result.current.playing).toBe(false);
   });
 

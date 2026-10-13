@@ -86,7 +86,12 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
   Push-Location extension
   try {
     pnpm install
-    if ($LASTEXITCODE -ne 0) { Warn "pnpm install basarisiz" } else { Ok "extension bagimliliklari kuruldu" }
+    if ($LASTEXITCODE -ne 0) {
+      Warn "pnpm install basarisiz (Windows'ta esbuild EPERM sorunu olabilir); npm ile deneniyor"
+      Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+      npm install --no-package-lock --no-audit --no-fund
+      if ($LASTEXITCODE -ne 0) { Warn "npm install de basarisiz" } else { Ok "extension bagimliliklari npm ile kuruldu" }
+    } else { Ok "extension bagimliliklari kuruldu" }
   } finally { Pop-Location }
 }
 

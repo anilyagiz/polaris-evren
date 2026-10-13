@@ -1,16 +1,11 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+
 export default defineConfig({
-  resolve: {
-    alias: {
-      "virtual:panel-browser-tool": fileURLToPath(
-        new URL("./src/panel/mocks/executeTool.mock.ts", import.meta.url),
-      ),
-    },
-  },
-  define: { __BROWSER_BRIDGE_READY__: "false" },
   esbuild: { jsx: "automatic" },
+  server: { fs: { allow: [repoRoot] } },
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],

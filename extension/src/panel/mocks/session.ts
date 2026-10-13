@@ -60,7 +60,8 @@ export function createMockTransport(
         currentId = event.id;
         queue = [];
         waiting = undefined;
-        const fixture = Object.values(fixtures)[0];
+        // Tests exercise the built-in demo flow so their assertions stay deterministic.
+        const fixture = import.meta.env.MODE === "test" ? undefined : Object.values(fixtures)[0];
         if (fixture) {
           try {
             enqueue(

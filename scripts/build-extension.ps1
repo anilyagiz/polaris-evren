@@ -5,15 +5,15 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Ext = Join-Path $Root "extension"
-if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) { throw "pnpm yok. Kurulum: npm install -g pnpm" }
+$usePnpm = [bool](Get-Command pnpm -ErrorAction SilentlyContinue)
 Push-Location $Ext
 try {
   if (-not (Test-Path "node_modules")) {
-    pnpm install
-    if ($LASTEXITCODE -ne 0) { throw "pnpm install basarisiz" }
+    if ($usePnpm) { pnpm install } else { npm install --no-package-lock --no-audit --no-fund }
+    if ($LASTEXITCODE -ne 0) { throw "bagimlilik kurulumu basarisiz (pnpm EPERM verirse: npm install --no-package-lock)" }
   }
-  pnpm build
-  if ($LASTEXITCODE -ne 0) { throw "pnpm build basarisiz" }
+  if ($usePnpm) { pnpm build } else { npm run build }
+  if ($LASTEXITCODE -ne 0) { throw "derleme basarisiz" }
 } finally { Pop-Location }
 
 $dist = Join-Path $Ext "dist"

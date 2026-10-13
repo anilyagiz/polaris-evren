@@ -53,7 +53,10 @@ export function describeMicError(error: unknown): {
   message: string;
   needsPermission: boolean;
 } {
-  const name = error instanceof Error ? error.name : "";
+  const name =
+    typeof (error as { name?: unknown } | null)?.name === "string"
+      ? (error as { name: string }).name
+      : "";
   if (name === "NotAllowedError" || name === "SecurityError")
     return {
       needsPermission: true,
@@ -307,12 +310,13 @@ export function useRecorder(
     setState("starting");
     setElapsed(0);
     try {
-      if (
-        !navigator.mediaDevices?.getUserMedia ||
-        typeof MediaRecorder === "undefined"
-      )
+      if (!navigator.mediaDevices?.getUserMedia)
         throw new Error("Bu tarayıcıda mikrofon kaydı kullanılamıyor.");
       const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (typeof MediaRecorder === "undefined") {
+        media.getTracks().forEach((track) => track.stop());
+        throw new Error("Bu tarayıcıda mikrofon kaydı kullanılamıyor.");
+      }
       if (!held.current || !active.current) {
         media.getTracks().forEach((track) => track.stop());
         if (active.current) setState("idle");
