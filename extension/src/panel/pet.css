@@ -24,7 +24,7 @@
 }
 
 .pet-character {
-  transform-origin: 126px 98px;
+  transform-origin: var(--pet-center-x, 100px) 98px;
   animation: polaris-float 3.6s ease-in-out infinite;
 }
 .pet-star-head {
@@ -43,7 +43,7 @@
   animation: polaris-blink 5.5s ease-in-out infinite;
 }
 .pet-aura {
-  transform-origin: 126px 98px;
+  transform-origin: var(--pet-center-x, 100px) 98px;
   opacity: 0.55;
   transition: opacity 0.3s ease;
 }
@@ -83,13 +83,25 @@
 .pet-working .pet-sheen {
   animation: polaris-shine 2.8s ease-in-out infinite;
 }
-.pet-greeting .pet-comet-tail,
 .pet-working .pet-comet-tail {
   opacity: 1;
   animation: polaris-tail 2.6s ease-in-out infinite;
 }
 .pet-working .pet-character {
   animation: polaris-flight 2.6s ease-in-out infinite;
+}
+.pet-idle .pet-aura {
+  opacity: 0.15;
+}
+.pet-idle .pet-stardust {
+  opacity: 0;
+  animation: none;
+}
+.pet-idle.pet-greeting .pet-aura {
+  opacity: 1;
+}
+.pet-idle.pet-greeting .pet-stardust {
+  animation: polaris-twinkle 3s ease-in-out infinite;
 }
 .pet-working .pet-trail-particles {
   animation: polaris-dust 1.8s ease-out infinite;

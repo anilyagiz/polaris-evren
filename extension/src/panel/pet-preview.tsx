@@ -36,7 +36,7 @@ function PetPreview() {
         ))}
       </div>
       <p className="pet-preview-note">
-        Çalışırken kuyruklu yıldız gibi süzülür, dinlerken dikkat kesilir.
+        Dinlenirken normal bir yıldız, çalışırken kuyruklu yıldız olur.
         <br />
         Bu tasarım önizlemesi gerçek bir görev başlatmaz.
       </p>

@@ -36,6 +36,7 @@ export function PolarisPet({
     "--pet-look-x": `${look.x}px`,
     "--pet-look-y": `${look.y}px`,
     "--pet-tilt": `${look.x * 0.7}deg`,
+    "--pet-center-x": mood === "working" ? "126px" : "100px",
   } as CSSProperties;
   return (
     <button
@@ -93,13 +94,13 @@ export function PolarisPet({
         </defs>
         <ellipse
           className="pet-aura"
-          cx="126"
+          cx={mood === "working" ? 126 : 100}
           cy="98"
           rx="68"
           ry="68"
           fill={`url(#${id}-aura)`}
         />
-        <g className="pet-comet-tail">
+        {mood === "working" && <g className="pet-comet-tail">
           <path
             d="M118 89 C77 70 32 102 8 149 C42 119 80 139 130 118Z"
             fill={`url(#${id}-tail)`}
@@ -126,9 +127,9 @@ export function PolarisPet({
             <circle cx="19" cy="151" r="1.5" />
             <path d="M50 97 L52 103 L58 105 L52 107 L50 113 L48 107 L42 105 L48 103Z" />
           </g>
-        </g>
+        </g>}
         <g className="pet-character">
-          <g transform="translate(26 27)">
+          <g transform={mood === "working" ? "translate(26 27)" : "translate(0 27)"}>
             <g className="pet-star-head">
               <path
                 d="M100 17 Q105 17 109 26 L121 48 L148 52 Q160 54 152 64 L132 85 L137 111 Q139 122 128 117 L100 104 L72 117 Q61 122 63 111 L68 85 L48 64 Q40 54 52 52 L79 48 L91 26 Q95 17 100 17Z"
