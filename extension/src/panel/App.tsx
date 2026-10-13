@@ -4,7 +4,6 @@ import {
   AudioLines,
   CheckCheck,
   CircleStop,
-  Compass,
   LoaderCircle,
   Mic,
   Settings as SettingsIcon,
@@ -14,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { executeBrowserTool } from "virtual:panel-browser-tool";
+import { PolarisPet, type PetMood } from "./PolarisPet";
 import {
   ConfirmModal,
   Markdown,
@@ -360,6 +360,14 @@ export default function App() {
   const recorderRef = useRef(recorder);
   recorderRef.current = recorder;
   const busy = activeId !== null || recorder.state !== "idle";
+  const petMood: PetMood =
+    recorder.state === "recording"
+      ? "listening"
+      : speaker.playing
+        ? "speaking"
+        : busy
+          ? "thinking"
+          : "idle";
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const cancel = () => {
@@ -411,6 +419,7 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
+    if (requests.length === 0) return;
     const node = scrollEnd.current;
     if (!node) return;
     const list = node.parentElement;
@@ -454,8 +463,8 @@ export default function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">
-            <Compass size={22} />
+          <span className="pet-brand">
+            <PolarisPet size={44} mood={petMood} />
           </span>
           <div>
             <h1>
@@ -523,7 +532,7 @@ export default function App() {
         {requests.length === 0 && (
           <div className="welcome">
             <div className="welcome-symbol">
-              <Sparkles size={30} strokeWidth={1.3} />
+              <PolarisPet size={84} />
             </div>
             <p className="eyebrow">BİRLİKTE, BİR ADIM İLERİ</p>
             <h2>
@@ -592,7 +601,12 @@ export default function App() {
             </div>
             <div className="assistant-message">
               <div className="assistant-label">
-                <span className="mini-mark">✦</span> POLARIS
+                <PolarisPet
+                  size={25}
+                  mood={request.status === "running" ? "thinking" : "idle"}
+                  animated={request.status === "running"}
+                />{" "}
+                POLARIS
                 {request.status === "running" && (
                   <LoaderCircle className="spin" size={13} />
                 )}
