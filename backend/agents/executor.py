@@ -21,7 +21,7 @@ from ..llm import LLMClient, ToolMessage, Usage
 from ..tools import registry
 from ..tools.registry import Tool
 from ..trace import EmitFn
-from .base import BaseAgent, ExecutorAction, HistoryEntry, Plan, render_snapshot
+from .base import CONVERSATION_BLOCK, REQUEST_MEMORIES, BaseAgent, ExecutorAction, HistoryEntry, Plan, render_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +109,18 @@ class ExecutorAgent(BaseAgent):
         return await self._resolve(message, usage, tools, emit, snapshot)
 
     def context_block(self, route: str) -> str:
-        return (
+        block = (
             "## Oturum\n"
             f"- Tarih/saat: {now_iso()}\n"
             f"- Yönlendirme (route): {route}\n"
             "- Unutma: her araç çağrısında `why` zorunlu."
         )
+        memories = REQUEST_MEMORIES.get()
+        if memories:
+            facts = "\n".join(f"  - {str(m.get('text', ''))[:200]}" for m in memories[:6])
+            block = f"{block}\n- Kullanıcı hakkında hafıza kayıtları:\n{facts}"
+        history = CONVERSATION_BLOCK.get()
+        return f"{block}\n\n{history}" if history else block
 
     # -- internals --------------------------------------------------------
     async def _resolve(

@@ -385,6 +385,60 @@ async def memory_save_search(ctx: Ctx) -> None:
         ctx.dump(run2)
 
 
+@scenario("conversation_follow_up", doc="2-turn follow-up sees the previous turn; session restore on reconnect; new_session resets")
+async def conversation_follow_up(ctx: Ctx) -> None:
+    ext = await ctx.ext()
+    hello = await ext.wait_for(lambda e: e.get("type") == "session", timeout=10)
+    ctx.check(hello is not None and hello.get("turns") == [], f"hello without session_id must yield an empty `session` event: {hello}")
+    session_id = (hello or {}).get("session_id")
+    run1 = await ext.ask("Ankara'nın nüfusu kaç?", tab=None)
+    first = ctx.expect_final(run1, "turn 1")
+    ctx.llm.reset()
+    run2 = await ext.ask("peki İzmir'in?", tab=None)
+    ctx.expect_final(run2, "turn 2")
+    routers = ctx.llm.calls_for("router")
+    ctx.check(
+        bool(routers) and "Kullanıcı: Ankara'nın nüfusu kaç?" in routers[0].system,
+        "follow-up: previous user turn missing from the router context",
+    )
+    if first:
+        ctx.check(
+            bool(routers) and f"Asistan: {first['answer'][:40]}" in routers[0].system,
+            "follow-up: previous answer missing from the router context",
+        )
+    responders = ctx.llm.calls_for("responder")
+    ctx.check(
+        bool(responders) and "Kullanıcı: Ankara'nın nüfusu kaç?" in responders[-1].system,
+        "follow-up: previous turn missing from the responder context",
+    )
+
+    # Reconnect with the stored session id: the panel can restore the chat.
+    other = await ctx.ext(session_id=session_id)
+    restored = await other.wait_for(lambda e: e.get("type") == "session", timeout=10)
+    texts = [t["text"] for t in (restored or {}).get("turns", [])]
+    ctx.check(
+        restored is not None and restored["session_id"] == session_id and texts[:1] == ["Ankara'nın nüfusu kaç?"] and len(texts) == 4,
+        f"session restore on reconnect failed: {restored}",
+    )
+
+    # Yeni sohbet: fresh id, empty history, no previous turns in the context.
+    idx = len(other.events)
+    await other.send({"type": "new_session"})
+    fresh = await other.wait_for(lambda e: e.get("type") == "session", timeout=10, since=idx)
+    ctx.check(
+        fresh is not None and fresh["session_id"] != session_id and fresh["turns"] == [],
+        f"new_session did not start an empty session: {fresh}",
+    )
+    ctx.llm.reset()
+    run3 = await other.ask("peki İzmir'in?", tab=None)
+    ctx.expect_final(run3, "after new_session")
+    routers = ctx.llm.calls_for("router")
+    ctx.check(
+        bool(routers) and "Kullanıcı: Ankara" not in routers[0].system,
+        "new_session: old turns leaked into the router context",
+    )
+
+
 # ==========================================================================
 # 9. cancel / timeouts / disconnects
 # ==========================================================================

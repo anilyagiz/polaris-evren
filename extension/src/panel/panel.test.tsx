@@ -539,7 +539,8 @@ describe("Conversation UX", () => {
       await Promise.resolve();
     });
     expect(writeText).toHaveBeenCalledWith("Uzun **cevap**");
-    fireEvent.click(screen.getByRole("button", { name: "Sohbeti temizle" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yeni sohbet" }));
+    expect(socket.sent.at(-1)).toEqual({ type: "new_session" });
     expect(screen.queryByText("Sayfayı oku")).toBeNull();
     expect(screen.getByText("Ne yapmak istersin?")).toBeTruthy();
   });

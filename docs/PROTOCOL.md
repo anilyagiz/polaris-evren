@@ -73,6 +73,8 @@ TTS_VOICE=tr-TR-EmelNeural
 TIMEZONE=Europe/Istanbul
 CUA_ENABLED=false
 DESKTOP_PARSER=ocr    # ocr | omniparser
+CONVERSATION_TURNS=10 # her isteğe eklenen önceki konuşma turu sayısı (0 = kapalı)
+MEMORY_EXTRACT=1      # 0: final sonrası kalıcı hafıza çıkarımı kapalı
 ```
 
 Backend portu `8765`. Extension backend adresini ayarlardan okur, varsayılan `http://localhost:8765`.
@@ -90,6 +92,7 @@ Backend portu `8765`. Extension backend adresini ayarlardan okur, varsayılan `h
 | POST | `/settings/llm/test` | JSON `{base_url?, model?, api_key?}` (eksikler mevcut ayardan) | `{ok, latency_ms, model, message}` (tek küçük sohbet çağrısı, 20 sn) | K3 |
 | GET | `/settings/llm/models` | `?base_url=&preset=` | `{models: [{id, label, note}], source: "api"\|"preset"}` | K3 |
 | GET | `/shots/{name}` | — | `image/png` (masaüstü ekran görüntüsü, işaretli) | K4 |
+| GET | `/session/latest` | — | `{session_id, updated_at, turns}` veya `{session_id: null}`; yalnızca loopback (aksi 403). Masaüstü penceresi ilk açılışta en son sohbeti sürdürmek için kullanır | K3 |
 
 CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verilir. `/settings/*` ayrıca loopback olmayan istemcileri ve izin dışı `Origin` başlığını 403 ile reddeder; gövde ≤ 4 KB.
 
@@ -99,9 +102,11 @@ CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verili
 
 ### İstemci → Sunucu
 ```jsonc
-{ "type": "hello", "client": "extension" | "desktop", "version": "0.1" }
+{ "type": "hello", "client": "extension" | "desktop", "version": "0.1",
+  "session_id": "s_1a2b3c4d5e6f7a8b" }          // isteğe bağlı, [A-Za-z0-9_-]{1,64}
 // "desktop" = Polaris masaüstü penceresi (/app/): browser.* araçları kapalı,
 // browser_task rotası sohbete düşürülür.
+{ "type": "new_session" }                       // "Yeni sohbet": boş geçmişli yeni oturum
 { "type": "user_msg", "id": "r_ab12", "text": "…", "source": "text" | "voice",
   "tab": { "id": 123, "url": "…", "title": "…" } | null }
 { "type": "tool_result", "call_id": "c_9f", "ok": true, "data": { … } | null, "error": "…" | null }
@@ -117,11 +122,31 @@ CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verili
 { "type": "final", "request_id": "r_ab12", "answer": "markdown", "spoken": "düz metin, ≤2 cümle", "citations": [ { "title": "…", "url": "…" , "ref": 21 } ] }
 { "type": "notify", "text": "Hatırlatma: toplantı 10:00", "spoken": "…" }
 { "type": "error", "request_id": "r_ab12" | null, "message": "…" }
+{ "type": "session", "session_id": "s_1a2b…",
+  "turns": [ { "role": "user" | "assistant", "text": "…", "request_id": "r_ab12", "ts": "ISO-8601" } ] }
 ```
 
 - Extension'a yalnızca `browser.*` isimli `tool_call`'lar gelir. `desktop.*`, `web.*`, `memory.*`, `reminders.*` backend'de çalışır.
 - `tool_result` 20 saniye içinde gelmezse backend çağrıyı hata sayar.
 - `need_confirm` cevabı 60 saniye içinde gelmezse reddedilmiş sayılır.
+
+### Sohbet oturumu (ek, geriye uyumlu)
+- Sunucu her `hello`'dan hemen sonra `session` gönderir. `hello.session_id` geçerliyse o oturum
+  sürdürülür ve son 20 tur (eskiden yeniye) `turns` içinde döner; yoksa/geçersizse sunucu yeni bir
+  id üretir (`turns: []`). İstemci id'yi saklar (eklenti: `chrome.storage.local`, masaüstü:
+  `localStorage`) ve sonraki bağlantılarda gönderir; `turns` ile görünür sohbeti geri yükler.
+- `new_session` → sunucu yeni id üretir ve `session` (boş `turns`) ile cevaplar. İstek sürerken
+  gönderilirse `error` ("Önceki istek hâlâ sürüyor.") döner.
+- Geçmiş SQLite `conversation_turns(session_id, request_id, role, text, created_at)` tablosundadır.
+  Her `user_msg`'de oturumun son `CONVERSATION_TURNS` (varsayılan 10) turu "## Önceki konuşma"
+  bloğu olarak Router/Planner/Executor/Judge/Responder bağlamına eklenir (tur başına ~400,
+  toplam ~3000 karakter). `final` sonrası kullanıcı metni + cevap eklenir; iptal/hata olan
+  isteklerde kullanıcı metni ve kısa bir not ("(İstek … iptal edildi.)") saklanır.
+- `final` sonrası arka planda tek küçük JSON çağrısı (sıcaklık 0) kullanıcının kendisi hakkında
+  söylediği kalıcı bilgileri ("Benim adım Anıl") `memory` tablosuna `profil` etiketiyle ekler
+  (benzerlikle tekilleştirilir; şifre, kart, IBAN, TC kimlik, API anahtarı asla saklanmaz).
+  Profil bilgileri her isteğin bağlamına "Kullanıcı hakkında hafıza kayıtları" olarak eklenir.
+- `hello`/`session_id` göndermeyen eski istemciler değişmeden çalışır (bağlantıya özel oturum).
 
 ### TraceStep
 ```jsonc
@@ -185,6 +210,7 @@ Handler hata durumunda exception fırlatmak yerine `{"ok": false, "error": "…"
 | `web.search` | `{query, count?: 5}` | `{results: [{title, url, snippet}]}` | safe | K5 |
 | `memory.save` | `{text, tags?: [str]}` | `{ok, id}` | safe | K5 |
 | `memory.search` | `{query}` | `{items: [{id, text, created_at}]}` | safe | K5 |
+| `memory.forget` | `{id?} \| {query?} \| {all?: true}` | `{ok, deleted, items: [{id, text}]}` | confirm | K5 |
 | `reminders.add` | `{text, due_iso}` | `{ok, id}` | safe | K5 |
 | `reminders.list` | `{}` | `{items: [{id, text, due_iso}]}` | safe | K5 |
 

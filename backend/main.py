@@ -329,6 +329,27 @@ async def traces(request: Request, request_id: str, limit: int = 200) -> JSONRes
     return JSONResponse({"request_id": request_id, "steps": rows})
 
 
+@app.get("/session/latest")
+async def session_latest(request: Request) -> JSONResponse:
+    """Most recently active conversation session (loopback only).
+
+    The desktop window adopts it on first run so it continues the chat the
+    user had in the Brave panel.  Answers ``{"session_id": null}`` when empty.
+    """
+
+    host = _client_host(request)
+    if not is_loopback(host):
+        logger.warning("/session/latest isteği reddedildi (istemci=%s)", host)
+        return JSONResponse(
+            {"detail": "Oturum bilgisine yalnızca bu bilgisayardan (localhost) erişilebilir."},
+            status_code=403,
+        )
+    from . import conversation
+
+    latest = await conversation.latest_session()
+    return JSONResponse(latest or {"session_id": None})
+
+
 def run() -> None:  # pragma: no cover - manual entry point
     from .__main__ import main
 

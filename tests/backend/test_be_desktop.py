@@ -227,3 +227,21 @@ async def test_desktop_refuses_named_browser_tool_without_bridge(tmp_path, fake_
 def test_context_block_default_has_no_desktop_note():
     assert BROWSER_AVAILABLE.get() is True
     assert NO_BROWSER_NOTE not in build_context_block()
+
+
+def test_app_serves_other_built_pages_rewritten(tmp_path):
+    """The desktop mascot page (mascot.html) gets the same /app/assets rewrite."""
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.desktop_app import register
+
+    page = tmp_path / "src" / "panel" / "mascot.html"
+    page.parent.mkdir(parents=True)
+    page.write_text('<script type="module" src="/assets/mascot-Z.js"></script>', encoding="utf-8")
+    app = FastAPI()
+    register(app, dist=tmp_path)
+    r = TestClient(app).get("/app/src/panel/mascot.html")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert 'src="/app/assets/mascot-Z.js"' in r.text

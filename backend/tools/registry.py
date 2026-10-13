@@ -52,7 +52,7 @@ ROUTE_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.key",
         "desktop.scroll",
     ),
-    "personal": ("memory.save", "memory.search", "reminders.add", "reminders.list"),
+    "personal": ("memory.save", "memory.search", "memory.forget", "reminders.add", "reminders.list"),
 }
 
 ToolHandler = Callable[[dict[str, Any], "ToolContext"], Awaitable[dict[str, Any]]]

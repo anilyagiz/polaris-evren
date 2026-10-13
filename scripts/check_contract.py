@@ -64,6 +64,8 @@ ALLOWED_FRAME_TYPES = frozenset(
     {
         "hello",
         "user_msg",
+        "new_session",
+        "session",
         "tool_result",
         "confirm",
         "cancel",

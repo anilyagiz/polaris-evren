@@ -1,0 +1,289 @@
+/*
+ * Desktop mascot window. The host window keys out its background colour
+ * (tray/mascot.py: TransparencyKey #010203), so the page itself is transparent.
+ * Colour-keyed windows cannot blend: the bubble is opaque, with a solid border
+ * instead of soft shadows.
+ */
+:root {
+  --m-surface: #fffdf8;
+  --m-line: #d9cfb8;
+  --m-ink: #0b1020;
+  --m-muted: #676d80;
+  --m-accent: #1b2550;
+  --m-accent-ink: #fbf8f1;
+  --m-gold: #f2c879;
+  --m-danger: #b43c34;
+  --m-field: #f3eee2;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --m-surface: #161e3a;
+    --m-line: #3a4570;
+    --m-ink: #eef1fa;
+    --m-muted: #a6aec6;
+    --m-accent: #f2c879;
+    --m-accent-ink: #0b1020;
+    --m-danger: #ff8f86;
+    --m-field: #0f1630;
+  }
+}
+
+html,
+body.mascot-body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font:
+    13.5px/1.45 "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  color: var(--m-ink);
+  user-select: none;
+}
+#mascot-root {
+  height: 100%;
+}
+
+.mascot {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+  box-sizing: border-box;
+}
+
+.mascot-pet {
+  position: absolute;
+  right: 14px;
+  bottom: 16px;
+  width: 120px;
+  height: 114px;
+  cursor: grab;
+}
+.mascot-pet:active {
+  cursor: grabbing;
+}
+.mascot-shake {
+  animation: mascot-shake 0.32s ease-in-out 4;
+}
+@keyframes mascot-shake {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-9deg) translateX(-3px);
+  }
+  75% {
+    transform: rotate(9deg) translateX(3px);
+  }
+}
+
+.mascot-bubble {
+  position: absolute;
+  right: 12px;
+  left: 12px;
+  bottom: 136px;
+  max-height: calc(100vh - 150px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border: 1.5px solid var(--m-line);
+  border-radius: 16px;
+  background: var(--m-surface);
+  user-select: text;
+}
+/* Tail pointing at the star. */
+.mascot-bubble::after {
+  content: "";
+  position: absolute;
+  right: 54px;
+  bottom: -9px;
+  width: 14px;
+  height: 14px;
+  background: var(--m-surface);
+  border-right: 1.5px solid var(--m-line);
+  border-bottom: 1.5px solid var(--m-line);
+  transform: rotate(45deg);
+}
+
+.mascot-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--m-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mascot-close:hover {
+  color: var(--m-ink);
+  background: var(--m-field);
+}
+
+.mascot-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--m-muted);
+}
+.mascot-text {
+  padding-right: 22px;
+  overflow-y: auto;
+  max-height: 210px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mascot-bubble-error .mascot-text {
+  color: var(--m-danger);
+}
+.mascot-working {
+  margin: 0;
+  padding-right: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 600;
+}
+.mascot-working small {
+  font-weight: 400;
+  color: var(--m-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mascot-dots {
+  width: 26px;
+  height: 6px;
+  background: radial-gradient(circle, var(--m-gold) 3px, transparent 3.5px) 0 0 / 9px 6px repeat-x;
+  animation: mascot-dots 1s linear infinite;
+}
+@keyframes mascot-dots {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.mascot-confirm p {
+  margin: 0 0 8px;
+  padding-right: 18px;
+  overflow-wrap: anywhere;
+}
+.mascot-actions {
+  display: flex;
+  gap: 8px;
+}
+.mascot-actions button,
+.mascot-footer button {
+  font: inherit;
+  cursor: pointer;
+}
+.mascot-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1.5px solid var(--m-line);
+  border-radius: 10px;
+  background: var(--m-field);
+  color: var(--m-ink);
+  font-weight: 600;
+}
+.mascot-actions .mascot-primary {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: var(--m-accent-ink);
+}
+
+.mascot-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mascot-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1.5px solid var(--m-line);
+  border-radius: 10px;
+  background: var(--m-field);
+  color: var(--m-ink);
+  font: inherit;
+  outline: none;
+}
+.mascot-form input:focus {
+  border-color: var(--m-accent);
+}
+.mascot-mic,
+.mascot-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid var(--m-line);
+  border-radius: 10px;
+  background: var(--m-field);
+  color: var(--m-ink);
+  cursor: pointer;
+  touch-action: none;
+}
+.mascot-send {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: var(--m-accent-ink);
+}
+.mascot-send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mascot-mic.is-recording {
+  background: var(--m-danger);
+  border-color: var(--m-danger);
+  color: #fff;
+}
+
+.mascot-footer {
+  display: flex;
+  justify-content: space-between;
+}
+.mascot-footer button {
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--m-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mascot-footer button:hover {
+  color: var(--m-ink);
+}
+.mascot-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--m-muted);
+}
+
+/* Colour key: half-transparent pixels blend with the key colour and turn into a
+   dark halo on the desktop, so the soft glow layers are dropped here. */
+.mascot .pet-aura {
+  display: none;
+}
+.mascot .polaris-pet-button svg,
+.mascot .polaris-pet-button * {
+  filter: none !important;
+}
+/* The pet's own "Merhaba!" hover bubble would be clipped by the tiny window. */
+.mascot .pet-greeting-bubble {
+  display: none;
+}

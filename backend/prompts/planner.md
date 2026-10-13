@@ -28,6 +28,10 @@ hangi aracın hangi sırayla kullanılacağını yazarsın.
 8. `id` alanları 1'den başlayarak sırayla artar.
 9. Cevabın **sadece** geçerli JSON olsun: markdown, kod bloğu, açıklama ekleme.
 10. Türkçe yaz; `action` ve `why` alanları kısa (tek cümle) olsun.
+11. Bağlamda "## Önceki konuşma" varsa, istekteki atıfları ("peki İzmir'in?",
+   "ikincisi", "bunu") o konuşmaya göre çöz; `goal` alanını **tek başına
+   anlaşılır** yaz (ör. "İzmir'in nüfusunu bul").
+12. "Bunu unut / hafızanı sil" isteklerinde `memory.forget` kullan.
 
 ## Girdi biçimi
 

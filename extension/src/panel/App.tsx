@@ -7,7 +7,7 @@ import {
   Mic,
   Settings as SettingsIcon,
   ShieldCheck,
-  Trash2,
+  MessageSquarePlus,
   Volume2,
   X,
 } from "lucide-react";
@@ -46,7 +46,20 @@ import {
 } from "./settings";
 import { useRecorder, useSpeaker } from "./voice";
 import { connectSocket, type OnEvent, type OnStatus, type Transport } from "./ws";
-import { DESKTOP_SUGGESTIONS, DESKTOP_BROWSER_ERROR, isDesktopMode } from "./runtime";
+import {
+  DESKTOP_SUGGESTIONS,
+  DESKTOP_BROWSER_ERROR,
+  desktopBackend,
+  isDesktopMode,
+} from "./runtime";
+import {
+  fetchLatestSession,
+  hasExtensionStorage,
+  loadSessionId,
+  loadSessionIdSync,
+  saveSessionId,
+  turnsToExchanges,
+} from "./session";
 
 interface Request {
   id: string;
@@ -101,6 +114,7 @@ export type TransportFactory = (
   onEvent: OnEvent,
   onStatus: OnStatus,
   onError: (message: string) => void,
+  getSessionId?: () => string | null,
 ) => Transport;
 
 export default function App({
@@ -133,6 +147,15 @@ export default function App({
   const [notification, setNotification] = useState("");
   const [hint, setHint] = useState("");
   const transport = useRef<Transport | null>(null);
+  // Conversation session (docs/PROTOCOL.md §6). localStorage is read
+  // synchronously; chrome.storage (extension) and the desktop window's first
+  // run (GET /session/latest) are async and gate the socket until loaded.
+  const sessionRef = useRef<string | null>(loadSessionIdSync());
+  const [sessionLoaded, setSessionLoaded] = useState(
+    () =>
+      !hasExtensionStorage() && !(isDesktopMode() && !sessionRef.current),
+  );
+  const awaitingNewSession = useRef(false);
   const handledCalls = useRef(new Set<string>());
   const generation = useRef(0);
   const scrollEnd = useRef<HTMLDivElement>(null);
@@ -197,6 +220,31 @@ export default function App({
   };
 
   const handleEvent = async (event: ServerEvent) => {
+    if (event.type === "session") {
+      const same = event.session_id === sessionRef.current;
+      sessionRef.current = event.session_id;
+      void saveSessionId(event.session_id);
+      const fresh = awaitingNewSession.current;
+      awaitingNewSession.current = false;
+      // Reconnect to the same session, a reply to "Yeni sohbet" (the view is
+      // already cleared) or a running request: keep what is on screen.
+      if (fresh || activeRef.current || (same && requestsRef.current.length > 0))
+        return;
+      const restored: Request[] = turnsToExchanges(event.turns).map((item) => ({
+        id: item.id,
+        text: item.text,
+        source: "text",
+        tab: null,
+        steps: [],
+        answer: item.answer,
+        spoken: "",
+        citations: [],
+        status: "done",
+      }));
+      requestsRef.current = restored;
+      setRequests(restored);
+      return;
+    }
     if (event.type === "notify") {
       setNotification(event.text);
       if (settingsRef.current.speak)
@@ -340,7 +388,26 @@ export default function App({
     void runHealth();
   }, [ready, settings.backend, runHealth]);
   useEffect(() => {
-    if (!ready) return;
+    if (sessionLoaded) return;
+    let cancelled = false;
+    void (async () => {
+      let id = await loadSessionId();
+      if (!id && isDesktopMode()) {
+        // Desktop window, first run: continue the most recent conversation.
+        const backend = desktopBackend() ?? settingsRef.current.backend;
+        id = await fetchLatestSession(backend);
+        if (id) await saveSessionId(id);
+      }
+      if (cancelled) return;
+      sessionRef.current = id;
+      setSessionLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionLoaded]);
+  useEffect(() => {
+    if (!ready || !sessionLoaded) return;
     generation.current += 1;
     const sessionGeneration = generation.current;
     handledCalls.current.clear();
@@ -380,6 +447,7 @@ export default function App({
         onEvent,
         onStatus,
         reportError,
+        () => sessionRef.current,
       );
     } catch {
       setStatus("disconnected");
@@ -390,7 +458,15 @@ export default function App({
       transport.current?.close();
       transport.current = null;
     };
-  }, [ready, settings.backend, reportError, update, runHealth, createTransport]);
+  }, [
+    ready,
+    sessionLoaded,
+    settings.backend,
+    reportError,
+    update,
+    runHealth,
+    createTransport,
+  ]);
   // While the server is down the socket keeps retrying; poll /health too so the
   // card clears on its own as soon as the backend starts.
   useEffect(() => {
@@ -542,6 +618,9 @@ export default function App({
   const clearChat = () => {
     if (busyRef.current) return;
     speakerRef.current.stop();
+    // "Yeni sohbet": the backend starts a fresh session (empty history) and
+    // answers with a `session` event carrying the new id.
+    awaitingNewSession.current = transport.current?.send({ type: "new_session" }) ?? false;
     requestsRef.current = [];
     setRequests([]);
     setError("");
@@ -683,12 +762,12 @@ export default function App({
           {requests.length > 0 && (
             <button
               className="icon-button"
-              aria-label="Sohbeti temizle"
-              title="Sohbeti temizle"
+              aria-label="Yeni sohbet"
+              title="Yeni sohbet (önceki konuşma bağlamı sıfırlanır)"
               disabled={busy}
               onClick={clearChat}
             >
-              <Trash2 size={16} />
+              <MessageSquarePlus size={16} />
             </button>
           )}
           <button

@@ -34,6 +34,12 @@ yapmazsın; sadece sınıflandırırsın ve kararının gerekçesini yazarsın.
 4. Rota dışı hiçbir alanı doldurma; plan, kod, açıklama veya markdown yazma.
 5. `confidence` 0.0–1.0 arası bir sayıdır; belirsizlikte 0.3–0.5 ver.
 6. `why` **Türkçe**, tek kısa cümle: kararın gerekçesi.
+7. **Takip soruları:** Bağlamda "## Önceki konuşma" varsa, yeni mesajdaki
+   atıfları ("peki İzmir'in?", "bunu", "ikincisini aç", "ikisini karşılaştır")
+   o konuşmaya göre çöz ve rotayı **çözülmüş isteğe** göre seç (ör. önceki
+   soru web araması gerektirdiyse "peki İzmir'in?" de `web_search`).
+8. "Bunu unut", "hafızanı sil", "benim adım ne?", "hakkımda ne biliyorsun"
+   gibi kalıcı hafıza okuma/silme istekleri `personal` rotasıdır.
 
 ## Çıktı
 

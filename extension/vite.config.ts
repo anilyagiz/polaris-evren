@@ -15,6 +15,7 @@ export default defineConfig({
       input: {
         permission: "src/panel/permission.html",
         pet: "src/panel/pet-preview.html",
+        mascot: "src/panel/mascot.html",
       },
     },
   },

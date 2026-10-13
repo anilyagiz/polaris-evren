@@ -94,6 +94,12 @@ def register(app: FastAPI, dist: Path | None = None) -> None:
         target = _safe_file(current_dist(), path)
         if target is None:
             return JSONResponse({"detail": "Bulunamadı"}, status_code=404)
+        if target.suffix == ".html":  # other built pages (e.g. the desktop mascot)
+            try:
+                html = target.read_text(encoding="utf-8")
+            except OSError:
+                return JSONResponse({"detail": "Bulunamadı"}, status_code=404)
+            return HTMLResponse(rewrite_index(html), headers={"Cache-Control": "no-cache"})
         media, _ = mimetypes.guess_type(target.name)
         # Hashed asset names never change content; the index itself is no-cache.
         cache = "public, max-age=31536000, immutable" if "/assets/" in f"/{path}" else "no-cache"

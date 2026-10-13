@@ -76,6 +76,8 @@ VSVersionInfo(
                   '--name','Polaris','--icon',$Ico,'--version-file',$VerFile,
                   '--distpath',$Dist,'--workpath',$Work,'--specpath',$Work,
                   '--paths',$Root,'--hidden-import','pystray._win32',
+                  # Masaustu maskotu (tray\mascot.py) app.py'de tembel import edilir.
+                  '--hidden-import','tray.mascot','--hidden-import','tray.desktop_window',
                   # Polaris penceresi: pywebview WinForms + WebView2 (edgechromium) arka ucu;
                   # pythonnet/clr_loader .NET koprusu (hook'lari DLL'leri toplar).
                   '--hidden-import','webview.platforms.winforms',

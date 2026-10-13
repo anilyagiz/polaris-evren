@@ -64,6 +64,20 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("notify"), text: z.string(), spoken: z.string() }),
   z.object({
+    type: z.literal("session"),
+    session_id: z.string(),
+    turns: z
+      .array(
+        z.object({
+          role: z.enum(["user", "assistant"]),
+          text: z.string(),
+          request_id: z.string().nullish().transform((v) => v ?? ""),
+          ts: z.string().nullish(),
+        }),
+      )
+      .default([]),
+  }),
+  z.object({
     type: z.literal("error"),
     request_id: z.string().nullable(),
     message: z.string(),
@@ -76,9 +90,19 @@ export type Citation = Extract<
   ServerEvent,
   { type: "final" }
 >["citations"][number];
+export type SessionTurn = Extract<
+  ServerEvent,
+  { type: "session" }
+>["turns"][number];
 export type TabContext = { id: number; url: string; title: string };
 export type ClientEvent =
-  | { type: "hello"; client: "extension" | "desktop"; version: "0.1" }
+  | {
+      type: "hello";
+      client: "extension" | "desktop";
+      version: "0.1";
+      session_id?: string;
+    }
+  | { type: "new_session" }
   | {
       type: "user_msg";
       id: string;

@@ -6,6 +6,7 @@ import {
   type ServerEvent,
 } from "./protocol";
 import { helloClient } from "./runtime";
+import { validSessionId } from "./session";
 
 export interface Transport {
   send(event: ClientEvent): boolean;
@@ -19,6 +20,8 @@ export function connectSocket(
   onEvent: OnEvent,
   onStatus: OnStatus,
   onError: (message: string) => void,
+  /** Current conversation session, sent in every (re)connect `hello`. */
+  getSessionId: () => string | null = () => null,
 ): Transport {
   let socket: WebSocket | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -31,13 +34,14 @@ export function connectSocket(
     socket.onopen = () => {
       if (stopped) return;
       delay = 1000;
-      socket?.send(
-        JSON.stringify({
-          type: "hello",
-          client: helloClient(),
-          version: "0.1",
-        } satisfies ClientEvent),
-      );
+      const sessionId = getSessionId();
+      const hello: ClientEvent = {
+        type: "hello",
+        client: helloClient(),
+        version: "0.1",
+        ...(validSessionId(sessionId) ? { session_id: sessionId } : {}),
+      };
+      socket?.send(JSON.stringify(hello));
       onStatus("connected");
     };
     socket.onmessage = (message: MessageEvent<unknown>) => {

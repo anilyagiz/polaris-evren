@@ -129,6 +129,30 @@ EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
             "spoken": {"type": "string", "minLength": 1},
         },
     },
+    "session": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["type", "session_id", "turns"],
+        "properties": {
+            "type": {"const": "session"},
+            "session_id": {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,64}$"},
+            "turns": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["role", "text", "request_id", "ts"],
+                    "properties": {
+                        "role": {"enum": ["user", "assistant"]},
+                        "text": {"type": "string", "minLength": 1},
+                        "request_id": _STR,
+                        "ts": _STR,
+                    },
+                },
+            },
+        },
+    },
     "error": {
         "type": "object",
         "additionalProperties": False,

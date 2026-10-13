@@ -81,6 +81,8 @@ def route_for(scenario: str) -> str:
 
 def detect_role(system: str, has_tools: bool) -> str:
     head = system[:400]
+    if head.startswith("# Hafıza çıkarıcı"):
+        return "extractor"
     if has_tools or "Executor (" in head:
         return "executor"
     if "Judge (" in head:
@@ -367,6 +369,10 @@ def build_app(state: FakeLLMState) -> FastAPI:
             return JSONResponse({"error": {"message": "fake upstream failure", "type": "server_error"}}, status_code=500)
         if scenario == "bad_json" and role == "router":
             return JSONResponse(_completion("bu bir JSON değil {{{"))
+
+        if role == "extractor":
+            # Background long-term memory extraction: nothing durable by default.
+            return JSONResponse(_json_reply({"facts": []}))
 
         if role == "router":
             route = route_for(scenario)

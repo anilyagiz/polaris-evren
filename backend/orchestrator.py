@@ -23,7 +23,16 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .agents.base import BROWSER_AVAILABLE, FinalAnswer, HistoryEntry, Plan
+from . import conversation
+from .agents.base import (
+    BROWSER_AVAILABLE,
+    CONVERSATION_BLOCK,
+    MAX_CONTEXT_MEMORIES,
+    REQUEST_MEMORIES,
+    FinalAnswer,
+    HistoryEntry,
+    Plan,
+)
 from .bridge import BrowserBridge, SendFn, new_call_id
 from .config import get_settings
 from .llm import LLMClient, get_llm
@@ -270,6 +279,12 @@ class Orchestrator:
         self._latest_snapshot: dict[str, Any] | None = None
         #: `hello.client` of this connection ("extension", "desktop", "cli"...).
         self.client_kind = ""
+        #: Conversation session of this connection (hello.session_id or generated).
+        self.session_id: str | None = None
+        #: request_id -> user text of requests whose turns are not stored yet.
+        self._pending_turns: dict[str, str] = {}
+        #: Background jobs (memory extraction); kept so they are not GC'd.
+        self._bg_tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def browser_available(self) -> bool:
@@ -303,6 +318,9 @@ class Orchestrator:
                     pass
                 except Exception as exc:
                     logger.info("Görev kapanışta hata verdi: %s", exc)
+        for task in list(self._bg_tasks):
+            task.cancel()
+        self._bg_tasks.clear()
         self._reminder_task = None
         self._task = None
         self._task_request_id = None
@@ -392,6 +410,17 @@ class Orchestrator:
             self.client_kind = str(frame.get("client") or "").strip().lower()
             if not self.browser_available:
                 logger.info("Masaüstü penceresi bağlandı: browser.* araçları kapalı")
+            requested = conversation.valid_session_id(frame.get("session_id"))
+            if frame.get("session_id") and requested is None:
+                logger.info("Geçersiz session_id yok sayıldı")
+            await self._open_session(requested or conversation.new_session_id())
+            return
+
+        if frame_type == "new_session":
+            if self._task is not None and not self._task.done():
+                await self._send_error(_frame_id(frame), "Önceki istek hâlâ sürüyor.")
+                return
+            await self._open_session(conversation.new_session_id())
             return
 
         if frame_type == "user_msg":
@@ -419,6 +448,81 @@ class Orchestrator:
         logger.info("Bilinmeyen frame tipi: %r", frame_type)
         await self._send_error(_frame_id(frame), f"Bilinmeyen frame tipi: {frame_type or '?'}")
 
+    async def _open_session(self, session_id: str) -> None:
+        """Adopt a session and send the `session` event with its recent turns."""
+
+        self.session_id = session_id
+        turns = await conversation.recent_turns(session_id, conversation.RESTORE_TURNS)
+        logger.info("Oturum: %s (%d tur)", session_id, len(turns))
+        try:
+            await self._send({"type": "session", "session_id": session_id, "turns": turns})
+        except Exception as exc:
+            logger.info("session frame gönderilemedi: %s", exc)
+
+    def _ensure_session(self) -> str:
+        """Clients without `hello`/session_id still get a (connection-local) session."""
+
+        if not self.session_id:
+            self.session_id = conversation.new_session_id()
+        return self.session_id
+
+    async def _store_turns(self, request_id: str, answer: str, *, extract: bool) -> None:
+        """Append the user turn (once) and the assistant's answer/note."""
+
+        user_text = self._pending_turns.pop(request_id, None)
+        if user_text is None:
+            return
+        session_id = self._ensure_session()
+        await conversation.append_turn(session_id, "user", user_text, request_id)
+        if answer.strip():
+            await conversation.append_turn(session_id, "assistant", answer, request_id)
+        if extract:
+            self._spawn(self._extract_memories(user_text, answer), f"memory-extract-{request_id}")
+
+    def _spawn(self, coro: Any, name: str) -> None:
+        task = asyncio.create_task(coro, name=name)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def wait_background(self, timeout: float | None = 30.0) -> None:
+        """Tests/CLI: wait for background memory extraction to finish."""
+
+        tasks = [task for task in self._bg_tasks if not task.done()]
+        if tasks:
+            await asyncio.wait(tasks, timeout=timeout)
+
+    async def _extract_memories(self, user_text: str, answer: str) -> None:
+        try:
+            from .memory_extract import extract_and_store
+
+            await extract_and_store(self.client, user_text, answer)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - background work never surfaces
+            logger.info("Hafıza çıkarımı atlandı: %s", exc)
+
+    async def _load_context(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Set the per-request conversation block; merge profile facts into memories."""
+
+        session_id = self._ensure_session()
+        turns = await conversation.recent_turns(session_id)
+        CONVERSATION_BLOCK.set(conversation.render_history(turns))
+        merged = list(memories)
+        try:
+            from .tools.memory import profile_facts
+
+            seen = {item.get("id") for item in merged}
+            for fact in await profile_facts(MAX_CONTEXT_MEMORIES):
+                if len(merged) >= MAX_CONTEXT_MEMORIES:
+                    break
+                if fact.get("id") not in seen:
+                    merged.append(fact)
+                    seen.add(fact.get("id"))
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Profil bilgileri okunamadı: %s", exc)
+        REQUEST_MEMORIES.set(tuple(merged))
+        return merged
+
     async def _on_user_msg(self, frame: dict[str, Any]) -> None:
         if self._task is not None and not self._task.done():
             await self._send_error(_frame_id(frame), "Önceki istek hâlâ sürüyor.")
@@ -434,6 +538,7 @@ class Orchestrator:
         tab = frame.get("tab") if isinstance(frame.get("tab"), dict) else None
         self.bridge.set_request_id(request_id)
         self._task_request_id = request_id
+        self._pending_turns[request_id] = text
         self._task = asyncio.create_task(
             self._run_request(request_id, text, source, tab), name=f"request-{request_id}"
         )
@@ -470,6 +575,9 @@ class Orchestrator:
         self._latest_snapshot = None
         # Task-local: agents add "Tarayıcı erişimi yok" to their context block.
         BROWSER_AVAILABLE.set(self.browser_available)
+        CONVERSATION_BLOCK.set("")
+        REQUEST_MEMORIES.set(())
+        failure_note = ""
         emit = make_emitter(
             self._send, self.store, request_id, snapshot_provider=lambda: self._latest_snapshot
         )
@@ -510,6 +618,7 @@ class Orchestrator:
             memories = await self._search_memories(
                 text, request_id, tab, emit, deadline=work_deadline
             )
+            memories = await self._load_context(memories)
             decision = await _within(
                 router.route(user_text=text, tab=tab, memories=memories, emit=emit), work_deadline
             )
@@ -648,14 +757,24 @@ class Orchestrator:
             log.info("İstek iptal edildi")
             await self._emit_quiet(emit, "system", "İstek iptal edildi", "Kullanıcı isteği durdurdu.")
             await self._announce_cancel(request_id)
+            failure_note = "(İstek kullanıcı tarafından iptal edildi.)"
             # Swallowed on purpose: the task must end cleanly after cancel().
         except Exception as exc:
+            failure_note = f"(İstek hata ile bitti: {_error_text(exc)[:200]})"
             log.exception("İstek hata ile bitti: %s", exc)
             await self._emit_quiet(
                 emit, "system", "İstek hata ile bitti", _error_text(exc)
             )
             await self._send_error(request_id, _error_text(exc))
         finally:
+            if request_id in self._pending_turns:
+                # No `final` went out (cancel, error, missing key): keep the user
+                # turn so a follow-up can still refer to it.
+                note = failure_note or "(İstek yanıtlanamadı.)"
+                try:
+                    await self._store_turns(request_id, note, extract=False)
+                except BaseException as exc:  # noqa: BLE001 - never mask the request outcome
+                    logger.info("Tur kaydedilemedi: %s", exc)
             if asyncio.current_task() is self._task:
                 self._task = None
                 self._task_request_id = None
@@ -1066,6 +1185,7 @@ class Orchestrator:
             logger.info("error frame gönderilemedi: %s", exc)
 
     async def _send_final(self, request_id: str, final: FinalAnswer) -> None:
+        await self._store_turns(request_id, final.answer or "", extract=True)
         try:
             await self._send(
                 {

@@ -15,6 +15,8 @@ from typing import Any
 
 from ..trace import EmitFn
 from .base import (
+    CONVERSATION_BLOCK,
+    REQUEST_MEMORIES,
     BaseAgent,
     Citation,
     FinalAnswer,
@@ -82,6 +84,13 @@ class ResponderAgent(BaseAgent):
             "Cevabı yalnızca bu kanıtlara dayandır; kanıtta olmayan bilgiyi uydurma. "
             "Kanıt zayıfsa bunu açıkça belirt."
         )
+        if CONVERSATION_BLOCK.get() or REQUEST_MEMORIES.get():
+            lines.append(
+                "Bağlamdaki '## Önceki konuşma' ve kullanıcı hakkındaki hafıza kayıtları da "
+                "kanıt sayılır: hedef önceki mesajlara atıf yapıyorsa (ör. 'peki İzmir'in?', "
+                "'ikisini karşılaştır') onları kullan; kullanıcının kendisi hakkında söyledikleri "
+                "(adı, tercihleri) hafızadan yanıtlanır."
+            )
 
         try:
             data, usage = await self.complete_json(

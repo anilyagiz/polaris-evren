@@ -30,6 +30,16 @@ NO_BROWSER_NOTE = (
     "Brave'de Polaris panelini açmasını söyle; sohbet, web araması, hafıza ve hatırlatmalar çalışır."
 )
 
+#: Rendered "## Önceki konuşma" block of the current session (set per request
+#: task by the orchestrator; empty for a fresh session or outside a request).
+CONVERSATION_BLOCK: ContextVar[str] = ContextVar("polaris_conversation_block", default="")
+#: Memory records relevant to the current request (search hits + profile facts).
+#: Agents that do not receive `memories` explicitly (responder, judge) use these.
+REQUEST_MEMORIES: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
+    "polaris_request_memories", default=()
+)
+MAX_CONTEXT_MEMORIES = 6
+
 RouteName = Literal["chat", "web_search", "browser_task", "desktop_task", "personal"]
 MAX_PLAN_STEPS = 5
 
@@ -194,10 +204,18 @@ def build_context_block(
     *,
     tab: dict[str, Any] | None = None,
     memories: list[dict[str, Any]] | None = None,
+    include_history: bool = True,
 ) -> str:
-    """Context appended to every agent's system prompt, every request."""
+    """Context appended to every agent's system prompt, every request.
+
+    ``memories=None`` falls back to the request's REQUEST_MEMORIES (so the
+    responder/judge see them too); the session's recent conversation
+    (CONVERSATION_BLOCK) is appended last.
+    """
 
     settings = get_settings()
+    if memories is None:
+        memories = list(REQUEST_MEMORIES.get())
     lines = [
         "## Bağlam",
         f"- Şu anki tarih/saat: {now_iso()} ({settings.timezone})",
@@ -209,8 +227,11 @@ def build_context_block(
     else:
         lines.append("- Aktif sekme bilgisi yok.")
     if memories:
-        lines.append("- İlgili hafıza kayıtları:")
-        for item in memories[:3]:
+        lines.append(
+            "- Kullanıcı hakkında hafıza kayıtları (kullanıcının daha önce söyledikleri; "
+            "soruyla ilgiliyse kullan):"
+        )
+        for item in memories[:MAX_CONTEXT_MEMORIES]:
             text = str(item.get("text", "")).strip()
             lines.append(f"  - ({item.get('id', '?')}) {text[:200]}")
     else:
@@ -219,7 +240,12 @@ def build_context_block(
         lines.append("- Masaüstü (desktop_*) yetenekleri bu oturumda KAPALI.")
     if not BROWSER_AVAILABLE.get():
         lines.append(NO_BROWSER_NOTE)
-    return "\n".join(lines)
+    block = "\n".join(lines)
+    if include_history:
+        history = CONVERSATION_BLOCK.get()
+        if history:
+            block = f"{block}\n\n{history}"
+    return block
 
 
 def render_snapshot(snapshot: dict[str, Any] | None, *, max_elements: int = 150) -> str:

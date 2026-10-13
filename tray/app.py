@@ -211,6 +211,7 @@ class TrayApp:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self.window: Any = None  # DesktopWindow once pywebview + WebView2 are usable
+        self.mascot: Any = None  # tray/mascot.py MascotWindow (desktop star)
         self.hotkey: Any = None
         self.show_listener: Any = None
         self.icon = pystray.Icon(APP_NAME, make_icon("grey"), "Polaris · başlıyor…", self._menu())
@@ -233,6 +234,9 @@ class TrayApp:
             Item("Eklenti klasörünü aç", self._safe(self.open_extension)),
             Item("Brave'e yükleme adımları", self._safe(self.show_brave_steps)),
             Menu.SEPARATOR,
+            Item("Maskotu göster/gizle", self._safe(self.toggle_mascot),
+                 checked=lambda _i: self._mascot_enabled(),
+                 enabled=lambda _i: self.mascot is not None),
             Item("Windows açılışında başlat", self._safe(self.toggle_autostart),
                  checked=lambda _i: self._autostart_enabled()),
             Menu.SEPARATOR,
@@ -251,6 +255,17 @@ class TrayApp:
                     self._wake.set()
             threading.Thread(target=work, daemon=True).start()
         return run
+
+    def _mascot_enabled(self) -> bool:
+        try:
+            return self.mascot is not None and bool(self.mascot.enabled)
+        except Exception:
+            return False
+
+    def toggle_mascot(self) -> None:
+        if self.mascot is not None:
+            self.mascot.toggle()
+        self.icon.update_menu()
 
     def _autostart_enabled(self) -> bool:
         try:
@@ -311,6 +326,8 @@ class TrayApp:
             self.ctrl.shutdown()
         finally:
             self.icon.stop()
+            if self.mascot is not None:
+                self.mascot.destroy()
             if self.window is not None:
                 self.window.destroy()
 
@@ -330,6 +347,8 @@ class TrayApp:
         self.icon.update_menu()
         if self.window is not None and status.state in (RUNNING, NO_KEY):
             self.window.set_backend(self.ctrl.address.base_url)
+            if self.mascot is not None:
+                self.mascot.set_backend(self.ctrl.address.base_url)
 
     def _poll_loop(self) -> None:
         last: Status | None = None
@@ -383,7 +402,21 @@ class TrayApp:
                                   icon_path=self.paths.app_icon,
                                   debug_port=int(debug) if debug.isdigit() else None)
         window.create()
+        self._make_mascot(window)
         return window
+
+    def _make_mascot(self, window: Any) -> None:
+        """Desktop star next to the main window; never fatal."""
+
+        try:
+            from .mascot import create_mascot_window
+
+            self.mascot = create_mascot_window(None, self.paths.tray_settings,
+                                               on_open_main=window.show,
+                                               on_change=self.icon.update_menu)
+        except Exception:
+            log.exception("maskot oluşturulamadı")
+            self.mascot = None
 
     def _start_window_helpers(self) -> None:
         from .hotkey import HotkeyListener
@@ -398,8 +431,12 @@ class TrayApp:
 
     def _window_started(self, show: bool) -> None:
         window = self.window
+        if self.mascot is not None:
+            self.mascot.mark_started()
         if self.ctrl.status.state in (RUNNING, NO_KEY):
             window.set_backend(self.ctrl.address.base_url)
+            if self.mascot is not None:
+                self.mascot.set_backend(self.ctrl.address.base_url)
         if show:
             window.show()
         window.flush_pending_show()

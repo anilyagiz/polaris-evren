@@ -166,8 +166,10 @@ class FakeExtension:
         tools: ToolPolicy = "answer",
         tool_delay_s: float = 0.0,
         page: FakePage | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.ws_url = ws_url
+        self.session_id = session_id
         self.confirm_policy = confirm
         self.tools_policy = tools
         self.tool_delay_s = tool_delay_s
@@ -187,7 +189,10 @@ class FakeExtension:
         self._ws = await websockets.connect(self.ws_url, max_size=8 * 1024 * 1024, open_timeout=10)
         self._reader = asyncio.create_task(self._read_loop())
         if hello:
-            await self.send({"type": "hello", "client": "extension", "version": "0.1"})
+            hello: dict[str, Any] = {"type": "hello", "client": "extension", "version": "0.1"}
+            if self.session_id:
+                hello["session_id"] = self.session_id
+            await self.send(hello)
         return self
 
     async def close(self) -> None:
