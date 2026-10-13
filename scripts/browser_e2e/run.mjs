@@ -5,6 +5,11 @@
  *   node scripts/browser_e2e/run.mjs            (headless Playwright Chromium)
  *   HEADED=1 node scripts/browser_e2e/run.mjs   (watch it)
  *   SKIP_BUILD=1 ...                            (reuse scripts/browser_e2e/out/ext)
+ *   node scripts/browser_e2e/run.mjs --live     (real LLM, real public pages)
+ *   node scripts/browser_e2e/run.mjs --voice    (real LLM; the backend's /tts speaks a
+ *     Turkish command -> 16 kHz WAV -> Chromium fake microphone; mouse and Space
+ *     push-to-talk, /stt, reminder creation, /tts playback, then a second browser
+ *     without --use-fake-ui-for-media-stream for the mic-denied flow)
  *
  * What it does:
  *  1. builds the extension into out/ext (own outDir, never touches extension/dist)
@@ -514,7 +519,10 @@ async function voiceTurn(panel, traffic, label, press, release) {
   const appeared = await ex.waitFor({ timeout: 15_000 }).then(() => true, () => false);
   const userText = appeared ? await ex.locator(".user-message p").innerText() : "";
   const voiceIcon = appeared ? (await ex.locator(".user-message .message-label svg").count()) > 0 : false;
-  record(`voice/${label}: transcript sent as user message`, appeared && /randevu|dişçi|dis[cç]i/i.test(userText),
+  // The panel must send exactly what /stt returned; whisper-small sometimes
+  // mangles "dişçi randevumu", so accept either keyword.
+  const sttText = (stt?.body?.text ?? "").trim();
+  record(`voice/${label}: transcript sent as user message`, appeared && userText.trim() === sttText && /randevu|diş/i.test(userText),
     appeared ? `"${userText}"${voiceIcon ? " [mic icon]" : " [no mic icon]"}` : `no exchange; banner: ${await banner()}`);
   if (!appeared) return null;
 
@@ -706,8 +714,9 @@ async function main() {
   // Settings UI reflects stored settings.
   await panel.getByLabel("Ayarlar").click();
   const backendField = await panel.locator("#backend").inputValue();
-  const mockChecked = await panel.locator(".setting-row input[type=checkbox]").first().isChecked();
-  record("settings UI shows backend URL and mock off", backendField === backendUrl && !mockChecked, `backend=${backendField} mock=${mockChecked}`);
+  // The only switch left in Settings is "Sesli yanıt" (the mock mode was removed).
+  const speakChecked = await panel.locator(".setting-row input[type=checkbox]").first().isChecked();
+  record("settings UI shows backend URL and stored speech setting", backendField === backendUrl && speakChecked === VOICE, `backend=${backendField} speak=${speakChecked}`);
   await shot(panel, "00-settings");
   await panel.locator("dialog.modal").getByLabel("Kapat").click();
   await shot(panel, "01-panel-connected");

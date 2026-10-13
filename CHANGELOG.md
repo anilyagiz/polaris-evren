@@ -8,6 +8,21 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) esaslıdır; sü
 
 İlk kullanıma hazır sürüm.
 
+### Doğrulama (gerçek sistemle)
+- Gerçek Chromium + yüklü eklenti + gerçek model (EVREN `gemma-4-31b`) ile canlı
+  testler 8/8: Vikipedi sayfa özeti, en ucuz 3 kitap (books.toscrape.com),
+  Vikipedi'de arama, anahtarsız web araması. `node scripts/browser_e2e/run.mjs --live`
+- Ses uçtan uca 19/19 (bas-konuş → STT → ajanlar → hatırlatıcı → TTS):
+  `node scripts/browser_e2e/run.mjs --voice`
+- Masaüstü (CUA) gerçek Docker sandbox'ında doğrulandı (`scripts/cua_smoke.py`).
+
+### Model ve hız
+- `LLM_MODEL=gemma-4-31b` + `LLM_THINKING=off` ile ajan adımı ~1 sn;
+  `LLM_FALLBACK_MODEL` (örn. `deepseek-v4.1-flash`) birincil model hata verirse devreye girer.
+- Metin olarak yazılan araç çağrıları (Gemma) otomatik ayrıştırılır.
+- `BRAVE_API_KEY` yoksa web araması anahtarsız DuckDuckGo yedeğiyle çalışır.
+- Varsayılan port **8765** (8000 çoğu makinede WSL/Docker/geliştirme sunucularıyla çakışıyor).
+
 ### Asistan
 
 - **Brave yan paneli** (MV3, React + TypeScript): sohbet, Markdown cevaplar, kaynak
