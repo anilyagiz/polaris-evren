@@ -8,7 +8,7 @@ export interface Settings {
 export const defaultSettings: Settings = {
   backend: "http://localhost:8000",
   mock: true,
-  speak: false,
+  speak: true,
 };
 const key = "polaris-panel-settings";
 

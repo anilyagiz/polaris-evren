@@ -76,7 +76,9 @@ export function createMockTransport(
             );
             return true;
           } catch {
-            /* Local fallback keeps the demo usable with an invalid fixture. */
+            console.warn(
+              "Polaris: shared/fixtures/session_example.jsonl geçersiz; panelin yerel demo akışı kullanılıyor.",
+            );
           }
         }
         const trace = (step: TraceStep): ServerEvent => ({

@@ -1,5 +1,5 @@
 import {
-  parseEvent,
+  parseSocketEvent,
   websocketUrl,
   type ClientEvent,
   type ConnectionStatus,
@@ -44,7 +44,8 @@ export function connectSocket(
       try {
         if (typeof message.data !== "string")
           throw new Error("Unexpected binary event");
-        onEvent(parseEvent(message.data));
+        const event = parseSocketEvent(message.data);
+        if (event) onEvent(event);
       } catch {
         onError("Sunucudan gelen olay protokole uymuyor.");
       }

@@ -95,6 +95,9 @@ describe("WebSocket lifecycle", () => {
     socket.onmessage?.({ data: new Uint8Array() });
     expect(onError).toHaveBeenCalledTimes(2);
     expect(onEvent).not.toHaveBeenCalled();
+    socket.onmessage?.({ data: JSON.stringify({ type: "heartbeat" }) });
+    expect(onError).toHaveBeenCalledTimes(2);
+    expect(onEvent).not.toHaveBeenCalled();
     socket.onmessage?.({
       data: JSON.stringify({ type: "notify", text: "Toplantı", spoken: "" }),
     });

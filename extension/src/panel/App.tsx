@@ -177,8 +177,9 @@ export default function App() {
       setPending(value);
     }
     if (event.type === "tool_call") {
-      if (handledCalls.current.has(event.call_id)) return;
-      handledCalls.current.add(event.call_id);
+      const callKey = `${event.request_id}:${event.call_id}`;
+      if (handledCalls.current.has(callKey)) return;
+      handledCalls.current.add(callKey);
       const callGeneration = generation.current;
       const tab = requestsRef.current.find(
         (request) => request.id === event.request_id,

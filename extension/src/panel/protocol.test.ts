@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeBackend,
   parseEvent,
+  parseSocketEvent,
   requestId,
   safeUrl,
   shotUrl,
@@ -9,6 +10,44 @@ import {
 } from "./protocol";
 
 describe("Protocol boundary", () => {
+  it("normalizes omitted nullable trace fields without rejecting the step", () => {
+    const event = parseEvent(
+      JSON.stringify({
+        type: "trace",
+        request_id: "r_demo",
+        step: {
+          agent: "router",
+          decision: "Route",
+          why: "Reason",
+          evidence: [],
+          latency_ms: 100,
+          ts: "2026-10-13T12:00:00+03:00",
+        },
+      }),
+    );
+    if (event.type !== "trace") throw new Error("Expected trace");
+    expect(event.step).toMatchObject({
+      confidence: null,
+      tool: null,
+      scores: null,
+      verdict: null,
+      tokens: null,
+    });
+    expect(() =>
+      parseEvent(
+        JSON.stringify({
+          type: "trace",
+          request_id: "r_demo",
+          step: { ...event.step, confidence: 2 },
+        }),
+      ),
+    ).toThrow();
+  });
+  it("ignores unknown socket event types while rejecting malformed known frames", () => {
+    expect(parseSocketEvent(JSON.stringify({ type: "heartbeat" }))).toBeNull();
+    expect(() => parseSocketEvent(JSON.stringify({ type: "trace" }))).toThrow();
+    expect(() => parseSocketEvent("{")).toThrow();
+  });
   it("accepts the frozen final frame including ref-only citations", () => {
     expect(
       parseEvent(

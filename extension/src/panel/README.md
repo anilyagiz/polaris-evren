@@ -30,7 +30,8 @@ pnpm test
 2. Geliştirici modunu aç.
 3. “Paketlenmemiş yükle” seçeneğiyle `extension/dist` klasörünü seç.
 4. Brave'in yan panel menüsünden “Polaris · EVREN Asistan”ı seç.
-5. İlk açılışta Mock açık, otomatik sesli yanıt kapalıdır. Dişli simgesinden değiştir.
+5. İlk açılışta Mock ve otomatik sesli yanıt açıktır. Dişli simgesinden değiştir.
+   Daha önce kaydedilen ses tercihi korunur; eski kurulumlarda sesli yanıtı Ayarlar'dan aç.
 
 **K2 entegrasyonu:** `src/background.ts` ve `src/content/index.ts` yalnızca başlangıç placeholder'larıdır.
 Toolbar ikonuna tıklayınca panel açılması için K2 background dosyasında

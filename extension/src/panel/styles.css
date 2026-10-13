@@ -1,13 +1,13 @@
 :root {
   font-family: Inter, "Segoe UI", Arial, sans-serif;
-  color: #253137;
-  background: #f8f9f6;
+  color: var(--ink);
+  background: var(--bg);
   font-synthesis: none;
   font-size: 13px;
   --bg: #f8f9f6;
   --surface: #fff;
   --ink: #253137;
-  --muted: #808985;
+  --muted: #626c65;
   --line: #e2e7e1;
   --accent: #46684d;
   --soft: #edf2ea;
@@ -267,7 +267,7 @@ pre {
 .suggestion-number {
   font-family: Georgia, serif;
   font-size: 12px;
-  color: #a1aea0;
+  color: var(--muted);
   background: var(--bg);
   height: 28px;
   width: 28px;
@@ -328,7 +328,7 @@ pre {
   max-height: 120px;
 }
 .composer textarea::placeholder {
-  color: #a2aaa2;
+  color: var(--muted);
 }
 .composer-controls {
   display: flex;
@@ -609,23 +609,23 @@ pre {
 }
 .agent-router {
   background: #eaf0fa;
-  color: #5a74a6;
+  color: #486391;
 }
 .agent-planner {
   background: #f1eafa;
-  color: #8d6aa5;
+  color: #74518a;
 }
 .agent-executor {
   background: #e5f1ec;
-  color: #4b846c;
+  color: #386b53;
 }
 .agent-judge {
   background: #fbf0df;
-  color: #9d783c;
+  color: #805e26;
 }
 .agent-responder {
   background: #eaf1e1;
-  color: #778848;
+  color: #596832;
 }
 .agent-system {
   background: var(--soft);
@@ -692,15 +692,15 @@ pre {
 }
 .pass {
   background: #e6f1e7;
-  color: #53835c;
+  color: #3e6947;
 }
 .revise {
   background: #faf2d9;
-  color: #9b852d;
+  color: #756319;
 }
 .ask_user {
   background: #fbeada;
-  color: #a56931;
+  color: #83501e;
 }
 .chip {
   border: 1px solid var(--line);
@@ -1001,12 +1001,6 @@ pre {
   }
   .suggestion-number {
     color: #9bae99;
-  }
-  .agent-badge {
-    filter: brightness(0.8);
-  }
-  .verdict {
-    filter: brightness(0.8);
   }
   .confidence i {
     background: #8faa84;

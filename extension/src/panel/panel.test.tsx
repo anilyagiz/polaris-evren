@@ -24,6 +24,21 @@ vi.mock("virtual:panel-browser-tool", () => ({
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  vi.stubGlobal("speechSynthesis", {
+    cancel: vi.fn(),
+    speak: vi.fn(),
+    getVoices: () => [],
+  });
+  vi.stubGlobal(
+    "SpeechSynthesisUtterance",
+    class {
+      lang = "";
+      voice = null;
+      onend = null;
+      onerror = null;
+      constructor(public text: string) {}
+    },
+  );
   localStorage.clear();
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute("open", "");
@@ -207,6 +222,57 @@ const mountLive = async () => {
 };
 
 describe("Live protocol wiring", () => {
+  it("allows a reused call_id in a new request but still deduplicates within each request", async () => {
+    const socket = await mountLive();
+    const firstId = socket.sent.find((frame) => frame.type === "user_msg")!
+      .id as string;
+    await act(async () => {
+      socket.receive({
+        type: "tool_call",
+        request_id: firstId,
+        call_id: "c_1",
+        name: "browser.read",
+        args: {},
+      });
+      await Promise.resolve();
+    });
+    act(() =>
+      socket.receive({
+        type: "final",
+        request_id: firstId,
+        answer: "Bitti",
+        spoken: "",
+        citations: [],
+      }),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Mesajın" }), {
+      target: { value: "Tekrar oku" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Mesajı gönder" }));
+      await Promise.resolve();
+    });
+    const secondId = socket.sent
+      .filter((frame) => frame.type === "user_msg")
+      .at(-1)!.id as string;
+    expect(secondId).not.toBe(firstId);
+    await act(async () => {
+      const call: ServerEvent = {
+        type: "tool_call",
+        request_id: secondId,
+        call_id: "c_1",
+        name: "browser.read",
+        args: {},
+      };
+      socket.receive(call);
+      socket.receive(call);
+      await Promise.resolve();
+    });
+    expect(executeBrowserTool).toHaveBeenCalledTimes(2);
+    expect(
+      socket.sent.filter((frame) => frame.type === "tool_result"),
+    ).toHaveLength(2);
+  });
   it("attaches the active tab, forwards browser tools once and sends their result", async () => {
     const socket = await mountLive();
     const user = socket.sent.find((frame) => frame.type === "user_msg")!;

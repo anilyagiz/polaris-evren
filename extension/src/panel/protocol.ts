@@ -13,18 +13,19 @@ export const traceSchema = z.object({
   decision: z.string(),
   why: z.string(),
   evidence: z.array(z.string()),
-  confidence: z.number().min(0).max(1).nullable(),
-  tool: z.object({ name: z.string(), args }).nullable(),
+  confidence: z.number().min(0).max(1).nullish().default(null),
+  tool: z.object({ name: z.string(), args }).nullish().default(null),
   scores: z
     .object({
       correct: z.number().int().min(1).max(5),
       complete: z.number().int().min(1).max(5),
       safe: z.number().int().min(1).max(5),
     })
-    .nullable(),
-  verdict: z.enum(["pass", "revise", "ask_user"]).nullable(),
+    .nullish()
+    .default(null),
+  verdict: z.enum(["pass", "revise", "ask_user"]).nullish().default(null),
   latency_ms: z.number().nonnegative(),
-  tokens: z.number().nonnegative().nullable(),
+  tokens: z.number().nonnegative().nullish().default(null),
   ts: z.string(),
 });
 export const serverEventSchema = z.discriminatedUnion("type", [
@@ -98,6 +99,22 @@ export type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
 export function parseEvent(raw: string): ServerEvent {
   return serverEventSchema.parse(JSON.parse(raw) as unknown);
+}
+const serverTypes = new Set<string>(
+  serverEventSchema.options.map((schema) => schema.shape.type.value),
+);
+// Unknown extension events are ignored; malformed known events still report errors.
+export function parseSocketEvent(raw: string): ServerEvent | null {
+  const value: unknown = JSON.parse(raw);
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    typeof value.type === "string" &&
+    !serverTypes.has(value.type)
+  )
+    return null;
+  return serverEventSchema.parse(value);
 }
 export function normalizeBackend(value: string): string {
   const url = new URL(value.trim());
