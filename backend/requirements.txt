@@ -11,4 +11,9 @@ tzdata>=2024.1                 # needed for ZoneInfo("Europe/Istanbul") on Windo
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.6
 python-multipart>=0.0.9        # REQUIRED for the POST /stt multipart body
-# --- Note: openai, pydantic, websockets etc. are K3's lines to add. ---
+# --- Person 3 (K3) lines — orchestrator, agents, browser bridge, WS ---
+openai>=1.30,<2                # DeepSeek via the OpenAI-compatible SDK
+pydantic>=2.6,<3               # agent output models + TraceStep
+python-dotenv>=1.0             # backend/.env (K5's db.load_env wins for real env vars)
+websockets>=12                 # uvicorn[standard] already pulls it; pinned for clarity
+# --- Note: nothing else to add; keep K5's lines above untouched. ---

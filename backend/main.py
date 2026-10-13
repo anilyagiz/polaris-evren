@@ -1,44 +1,116 @@
-"""TEMPORARY SCAFFOLD — this file is owned by Person 3 (K3).
+"""FastAPI application entry point.  Owner: K3.
 
-Replace it wholesale with K3's real main.py when it lands. This version exists
-only so the Person 5 modules (STT/TTS + tools) can be exercised standalone;
-/ws, the orchestrator and the browser bridge belong to K3.
+This replaces the K5 scaffold (see docs/HANDOFF-K3.md §1).  It keeps what K5
+needs — ``load_env()`` before any configuration is read, the K5 tool modules
+imported so they register themselves, and the STT/TTS routers — and adds the
+parts that belong to K3: ``/ws`` (orchestrator), the browser bridge, the
+explainability traces and the desktop shots router.
 
-Run from the repository root:
-    uvicorn backend.main:app --reload --port 8000
+Runs even while other owners' modules (or their dependencies) are missing:
+every optional import is guarded and logged.
 """
+
 from __future__ import annotations
 
+import importlib
 import logging
-import sys
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Callable
 
-# The Windows console may be cp1252; keep Turkish log lines from crashing.
-if sys.stderr.encoding and sys.stderr.encoding.lower().replace("_", "-") != "utf-8":
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from backend.db import load_env
+# K5's hand-rolled .env loader runs before anything reads configuration (their
+# modules call it too; it is idempotent and never overwrites real env vars).
+try:  # pragma: no cover - trivial guard
+    from .db import load_env
 
-# Load .env before anything reads configuration (K3's llm.py included).
-load_env()
+    load_env()
+except Exception:  # backend/db.py not merged yet
+    pass
 
-# Importing the K5 tool modules registers them in the registry.
-from backend.tools import memory as memory_tools  # noqa: E402,F401
-from backend.tools import reminders as reminders_tools  # noqa: E402,F401
-from backend.tools import search as search_tools  # noqa: E402,F401
-from backend.voice.stt import router as stt_router  # noqa: E402
-from backend.voice.tts import router as tts_router  # noqa: E402
+from .config import ensure_data_dir, get_settings  # noqa: E402
+from .trace import TraceStore  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+logger = logging.getLogger("backend.main")
 
-app = FastAPI(title="Assistant API", version="0.1")
+settings = get_settings()
+store = TraceStore()
 
-# CORS: allow every origin, the chrome-extension:// scheme included.
+
+# ---------------------------------------------------------------------------
+# Tool modules.  Importing them is what registers their tools in the registry
+# (backend/tools/__init__.py stays empty on purpose: no double registration).
+# ---------------------------------------------------------------------------
+TOOL_MODULES: tuple[str, ...] = (
+    ".tools.browser",  # K3
+    ".tools.desktop",  # K4
+    ".tools.search",  # K5
+    ".tools.memory",  # K5
+    ".tools.reminders",  # K5
+)
+
+# Routers owned by other people.  Missing files are not fatal.
+OPTIONAL_ROUTERS: tuple[tuple[str, str], ...] = (
+    (".voice.stt", "router"),  # K5 -> POST /stt
+    (".voice.tts", "router"),  # K5 -> POST /tts
+    (".cua.shots_router", "router"),  # K4 -> GET /shots/{name}
+)
+
+
+def _import_module(module_path: str) -> Any | None:
+    try:
+        return importlib.import_module(module_path, package=__package__)
+    except Exception as exc:  # ModuleNotFoundError, ImportError, syntax error...
+        logger.info("Opsiyonel modül yüklenemedi %s: %s", module_path, exc)
+        return None
+
+
+def _register_tools() -> None:
+    from .tools import registry
+
+    for module_path in TOOL_MODULES:
+        _import_module(module_path)
+    names = sorted(tool.name for tool in registry.all_tools())
+    logger.info("Kayıtlı araçlar (%d): %s", len(names), ", ".join(names) or "-")
+
+
+def _include_optional_routers(target: FastAPI) -> None:
+    for module_path, attr in OPTIONAL_ROUTERS:
+        module = _import_module(module_path)
+        if module is None:
+            continue
+        router = getattr(module, attr, None)
+        if router is None:
+            logger.warning("%s içinde %s yok, atlanıyor", module_path, attr)
+            continue
+        target.include_router(router)
+        logger.info("Router eklendi: %s.%s", module_path, attr)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    ensure_data_dir()
+    await store.init()
+    logger.info(
+        "Backend hazır — port %s, model %s, CUA %s",
+        settings.port,
+        settings.llm_model,
+        "açık" if settings.cua_enabled else "kapalı",
+    )
+    if not settings.llm_configured:
+        logger.warning("DEEPSEEK_API_KEY boş: LLM gerektiren istekler hata dönecek.")
+    yield
+
+
+app = FastAPI(title="Personal Assistant Backend", version="0.1", lifespan=lifespan)
+
+# CORS: every origin, chrome-extension:// included.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,15 +119,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Voice endpoints (K5).
-app.include_router(stt_router)
-app.include_router(tts_router)
+_register_tools()
+_include_optional_routers(app)
 
 
 @app.get("/health")
-async def health() -> dict[str, bool]:
-    """Liveness probe."""
-    return {"ok": True}
+async def health() -> dict[str, Any]:
+    """Liveness probe (the K1 panel and the demo script both use it)."""
+
+    return {
+        "ok": True,
+        "llm_model": settings.llm_model,
+        "cua_enabled": settings.cua_enabled,
+        "llm_configured": settings.llm_configured,
+    }
 
 
-# K3: the WebSocket /ws endpoint, orchestrator, bridge and /shots go here.
+# ---------------------------------------------------------------------------
+# WebSocket
+# ---------------------------------------------------------------------------
+async def _echo_connection(websocket: WebSocket) -> None:
+    """Fallback used when the orchestrator cannot be imported."""
+
+    await websocket.accept()
+    await websocket.send_json(
+        {"type": "error", "request_id": None, "message": "orchestrator yüklenemedi"}
+    )
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Echo bağlantısı kapandı: %s", exc)
+
+
+def _resolve_ws_handler() -> Callable[[WebSocket], Any]:
+    try:
+        from .orchestrator import serve_connection
+    except Exception as exc:
+        logger.error("orchestrator içe aktarılamadı (%s); echo fallback aktif", exc)
+        return _echo_connection
+    return serve_connection
+
+
+@app.websocket("/ws")
+async def ws_endpoint(websocket: WebSocket) -> None:
+    handler = _resolve_ws_handler()
+    try:
+        await handler(websocket)
+    except WebSocketDisconnect:
+        logger.info("İstemci bağlantıyı kapattı")
+    except Exception as exc:  # never take the process down for one socket
+        logger.exception("WS handler beklenmeyen hata: %s", exc)
+        try:
+            await websocket.send_json({"type": "error", "request_id": None, "message": str(exc)})
+        except Exception:
+            pass
+
+
+@app.get("/traces/{request_id}")
+async def traces(request_id: str, limit: int = 200) -> JSONResponse:
+    """Debug helper: replay one request's explainability timeline."""
+
+    rows = await store.history(request_id, limit=limit)
+    return JSONResponse({"request_id": request_id, "steps": rows})
+
+
+def run() -> None:  # pragma: no cover - manual entry point
+    import uvicorn
+
+    uvicorn.run("backend.main:app", host=settings.host, port=settings.port, reload=False)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    run()

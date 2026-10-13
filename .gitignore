@@ -9,3 +9,6 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# local duplicate copy
+assistant/
