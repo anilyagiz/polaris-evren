@@ -18,7 +18,7 @@ function PetPreview() {
       <p className="eyebrow">POLARIS · KÜÇÜK ÇALIŞMA ARKADAŞIN</p>
       <h1>Bir yıldızdan biraz fazlası.</h1>
       <p className="pet-preview-intro">
-        Üzerine gel, sana el sallasın. Tıkla, birlikte parlayın.
+        Üzerine gel, ışıldasın. Tıkla, yıldız tozu bıraksın.
       </p>
       <section className="pet-preview-stage" aria-label="Etkileşimli maskot">
         <PolarisPet size={260} mood={mood} />
@@ -36,7 +36,7 @@ function PetPreview() {
         ))}
       </div>
       <p className="pet-preview-note">
-        Çalışırken laptopunu açar, dinlerken dikkat kesilir.
+        Çalışırken kuyruklu yıldız gibi süzülür, dinlerken dikkat kesilir.
         <br />
         Bu tasarım önizlemesi gerçek bir görev başlatmaz.
       </p>

@@ -816,7 +816,7 @@ export default function App({
               </strong>
               <p>
                 {petMood === "working"
-                  ? "Polaris laptopunun başında."
+                  ? "Polaris yıldız tozu bırakıyor."
                   : "Üzerine gel, seninle selamlaşsın."}
               </p>
             </div>
