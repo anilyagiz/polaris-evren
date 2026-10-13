@@ -6,6 +6,10 @@
 - Girdi: multipart, alan adı "audio" (extension audio/webm gönderir).
 - Çıktı: {"text", "language", "duration_s"}; boş ses → {"text": ""}.
 
+Hız notu: CTranslate2'ye mantıksal çekirdek sayısını vermek oversubscription
+yapıp yavaşlatır; bu yüzden varsayılan olarak fiziksel çekirdek (mantıksal/2)
+kullanılır. STT_CPU_THREADS ortam değişkeni ile elle ayarlanabilir.
+
 K3 main.py'de:
     from backend.voice.stt import router as stt_router
     app.include_router(stt_router)
@@ -30,6 +34,7 @@ router = APIRouter()
 # Model tek örnek olarak bellekte tutulur (ağırlıklı import ilk istekte yapılır).
 _MODEL: Any = None
 _MODEL_SIZE: str | None = None
+_MODEL_THREADS: int | None = None
 _MODEL_LOCK = asyncio.Lock()
 
 _WEBM_SUFFIXES = {".webm", ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".mp4", ".flac"}
@@ -40,16 +45,40 @@ def _model_size() -> str:
     return (os.environ.get("STT_MODEL") or "small").strip() or "small"
 
 
+def _cpu_threads() -> int:
+    """CTranslate2 için iş parçacığı sayısı.
+
+    Varsayılan: fiziksel çekirdek sayısı (os.cpu_count() mantıksal döner,
+    bu yüzden ikiye bölünür). Ryzen 7 4800H'de 16 -> 8.
+    """
+    load_env()
+    raw = (os.environ.get("STT_CPU_THREADS") or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    logical = os.cpu_count() or 4
+    return max(1, logical // 2)
+
+
 def _get_model() -> Any:
     """faster-whisper modelini bir kez yükler (CPU, int8)."""
-    global _MODEL, _MODEL_SIZE
+    global _MODEL, _MODEL_SIZE, _MODEL_THREADS
     size = _model_size()
-    if _MODEL is None or _MODEL_SIZE != size:
+    threads = _cpu_threads()
+    if _MODEL is None or _MODEL_SIZE != size or _MODEL_THREADS != threads:
         from faster_whisper import WhisperModel  # ağır import; ilk istekte
 
-        logger.info("faster-whisper modeli yükleniyor: %s (cpu, int8)", size)
-        _MODEL = WhisperModel(size, device="cpu", compute_type="int8")
+        logger.info(
+            "faster-whisper modeli yükleniyor: %s (cpu, int8, %d iş parçacığı)", size, threads
+        )
+        _MODEL = WhisperModel(
+            size,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=threads,
+            num_workers=1,
+        )
         _MODEL_SIZE = size
+        _MODEL_THREADS = threads
         logger.info("faster-whisper modeli hazır: %s", size)
     return _MODEL
 
@@ -61,7 +90,9 @@ def _transcribe_sync(path: str) -> tuple[str, str, float]:
         path,
         language="tr",
         vad_filter=True,
-        beam_size=1,                    # hız için
+        beam_size=1,                       # hız için
+        temperature=0.0,                   # deterministik + fallback taraması yapmaz
+        without_timestamps=True,           # zaman damgası üretimi kısa klipte gereksiz
         condition_on_previous_text=False,  # kısa kliplerde hız + hata yayılımını önler
     )
     parts: list[str] = []

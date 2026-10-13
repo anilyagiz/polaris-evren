@@ -10,13 +10,17 @@ Sözleşmeler:
 
 Tablo: reminders(id, text, due_at, notified)
 due_iso saat dilimi içermiyorsa TIMEZONE varsayılır; geçmiş zaman hatadır.
+
+Saat dilimi notu: due_at veritabanında daima UTC saklanır. Dışarı verilen
+`due_iso` alanları ise kullanıcının gördüğü yerel saat (TIMEZONE) ile
+biçimlendirilir; ikisi de geçerli ISO 8601'dir ve aynı anı gösterir.
 """
 from __future__ import annotations
 
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -26,6 +30,9 @@ from backend.tools.registry import Tool, ToolContext, register
 logger = logging.getLogger(__name__)
 
 _table_ready = False
+
+#: TIMEZONE çözülemezse kullanılacak sabit ofset (Türkiye, yaz saati uygulamaz).
+_FALLBACK_TZ = timezone(timedelta(hours=3))
 
 
 def _ensure_table() -> None:
@@ -53,8 +60,10 @@ def _tz() -> ZoneInfo | timezone:
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError, KeyError):
-        logger.warning("TIMEZONE=%s çözülemedi; +03:00 kullanılıyor", name)
-        return timezone.utc
+        logger.warning(
+            "TIMEZONE=%s çözülemedi; sabit +03:00 kullanılıyor (tzdata kurulu mu?)", name
+        )
+        return _FALLBACK_TZ
 
 
 def _parse_due(due_iso: str) -> datetime | str:
@@ -66,6 +75,20 @@ def _parse_due(due_iso: str) -> datetime | str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_tz())
     return dt
+
+
+def _to_local_iso(utc_iso: str) -> str:
+    """DB'deki UTC damgasını kullanıcının yerel saatine çevirir.
+
+    Panel "yarın 10:00" yerine "07:00" göstermesin diye.
+    """
+    try:
+        dt = datetime.fromisoformat(utc_iso)
+    except ValueError:
+        return utc_iso
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_tz()).isoformat(timespec="seconds")
 
 
 async def _add(args: dict, ctx: ToolContext) -> dict:
@@ -106,7 +129,7 @@ async def _list(args: dict, ctx: ToolContext) -> dict:
             "SELECT id, text, due_at FROM reminders ORDER BY due_at"
         ).fetchall()
     items = [
-        {"id": row["id"], "text": row["text"], "due_iso": row["due_at"]}
+        {"id": row["id"], "text": row["text"], "due_iso": _to_local_iso(row["due_at"])}
         for row in rows
     ]
     return {"ok": True, "items": items}
@@ -117,6 +140,9 @@ async def due() -> list[dict]:
 
     Döndüğü her kaydı notified=1 olarak işaretler; aynı hatırlatıcı
     ikinci kez asla dönmez. K3 30 sn'de bir çağırır.
+
+    İşaretleme, seçilen kayıtların **id listesi** üzerinden yapılır; böylece
+    araya giren bir yazma işlemi olsa bile yanlış satır işaretlenmez.
     """
     load_env()
     _ensure_table()
@@ -128,14 +154,16 @@ async def due() -> list[dict]:
             (now_utc,),
         ).fetchall()
         if rows:
+            ids = [str(row["id"]) for row in rows]
+            placeholders = ",".join("?" * len(ids))
             conn.execute(
-                "UPDATE reminders SET notified = 1 WHERE notified = 0 AND due_at <= ?",
-                (now_utc,),
+                f"UPDATE reminders SET notified = 1 WHERE id IN ({placeholders})",
+                ids,
             )
     if rows:
         logger.info("due(): %d hatırlatıcı bildirime hazır", len(rows))
     return [
-        {"id": row["id"], "text": row["text"], "due_iso": row["due_at"]}
+        {"id": row["id"], "text": row["text"], "due_iso": _to_local_iso(row["due_at"])}
         for row in rows
     ]
 

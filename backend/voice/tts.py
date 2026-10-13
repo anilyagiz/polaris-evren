@@ -7,6 +7,10 @@
 - edge-tts resmî olmayan bir istemcidir ve internet ister; hata → 503
   (panel bu durumda tarayıcı sesine geçer).
 
+Uç nokta notu: Önce edge-tts'in kendi (DRM/Sec-MS-GEC destekli) uç noktası
+denenir. Yalnızca 403/429/ağ hatasında bir kez yedek uç nokta ile tekrarlanır.
+Böylece Microsoft tarafındaki bir sorun çalışan varsayılanı bozmaz.
+
 K3 main.py'de:
     from backend.voice.tts import router as tts_router
     app.include_router(tts_router)
@@ -18,6 +22,7 @@ import hashlib
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +38,7 @@ router = APIRouter()
 TTS_CACHE_DIR = DATA_DIR / "tts_cache"
 MAX_CHARS = 600
 _TTS_TIMEOUT_S = 30.0
+_RETRY_SLEEP_S = 2.0
 
 # --- Metin temizleme -------------------------------------------------------
 _URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
@@ -82,15 +88,17 @@ _EDGE_WORKAROUND_DONE = False
 
 
 def _apply_edge_workaround() -> None:
-    """edge-tts 7.2.8 için geçici uç nokta düzeltmesi.
+    """edge-tts için YEDEK uç nokta düzeltmesi (varsayılan DEĞİL, son çare).
 
-    Microsoft, Edge "Oku" (Read Aloud) WebSocket'ini 2026-10'da
-    speech.platform.bing.com -> api.msedgeservices.com adresine taşıdı;
-    eski adrese yapılan el sıkışması artık 403 dönüyor (mp3 çıktısı aynı:
-    24 kHz mono). Kaynak: https://github.com/rany2/edge-tts/issues/490
+    Microsoft, Edge "Oku" (Read Aloud) WebSocket'ini zaman zaman taşıyor ve
+    eski adrese yapılan el sıkışması 403 dönebiliyor. Bu fonksiyon **yalnızca
+    normal deneme başarısız olduğunda** çağrılır; çalışan bir kurulumu
+    bozmamak için peşinen uygulanmaz.
+
     DİKKAT: `edge_tts.communicate.WSS_URL` üzerine yazılmalı — kütüphane
     `from .constants import WSS_URL` yaptığı için constants'taki değişiklik
-    işe yaramaz. Kütüphene güncellenirse bu fonksiyon zararsızdır.
+    işe yaramaz. Kütüphane güncellenirse bu fonksiyon zararsızdır.
+    Referans: https://github.com/rany2/edge-tts/issues/490
     """
     global _EDGE_WORKAROUND_DONE
     if _EDGE_WORKAROUND_DONE:
@@ -104,7 +112,7 @@ def _apply_edge_workaround() -> None:
             f"?Ocp-Apim-Subscription-Key={TRUSTED_CLIENT_TOKEN}"
         )
         _EDGE_WORKAROUND_DONE = True
-        logger.info("edge-tts uç noktası api.msedgeservices.com olarak ayarlandı (issue #490)")
+        logger.warning("edge-tts yedek uç noktası devreye alındı (issue #490)")
     except Exception as exc:  # noqa: BLE001
         logger.warning("edge-tts uç noktası düzeltmesi uygulanamadı: %s", exc)
 
@@ -114,8 +122,22 @@ def _cache_path(text: str, voice: str) -> Path:
     return TTS_CACHE_DIR / f"{key}.mp3"
 
 
+def _cleanup(path: Path) -> None:
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        pass
+
+
 async def _synthesize(text: str, voice: str) -> bytes:
-    """edge-tts ile mp3 üretir; hata durumunda 503 fırlatır."""
+    """edge-tts ile mp3 üretir; hata durumunda 503 fırlatır.
+
+    Deneme sırası:
+      1) kütüphanenin kendi uç noktası (DRM/Sec-MS-GEC ile)
+      2) yalnızca 1. deneme hata verirse: yedek uç nokta
+    Zaman aşımında yedek denenmez (uç nokta değiştirmek zaman aşımını çözmez).
+    """
     try:
         import edge_tts  # noqa: PLC0415 — ağ istemcisi, ilk kullanımda
     except ImportError as exc:  # pragma: no cover
@@ -129,29 +151,36 @@ async def _synthesize(text: str, voice: str) -> bytes:
     if target.is_file() and target.stat().st_size > 0:
         return target.read_bytes()
 
-    tmp = target.with_suffix(".tmp")
     last_error: Exception | None = None
     timed_out = False
-    # Yeni uç nokta sıkı rate-limit yapabiliyor (429): bir kez tekrar dene.
-    for attempt in (1, 2):
-        try:
+
+    for use_patched in (False, True):
+        if use_patched:
             _apply_edge_workaround()
+        # Benzersiz geçici ad: aynı metin iki kez eşzamanlı istenirse
+        # iki istek aynı .tmp dosyasına yazıp bozuk mp3 üretmesin.
+        tmp = target.with_name(f"{target.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
             communicate = edge_tts.Communicate(text, voice)
             await asyncio.wait_for(communicate.save(str(tmp)), timeout=_TTS_TIMEOUT_S)
             os.replace(tmp, target)
-            last_error = None
-            break
+            return target.read_bytes()
         except asyncio.TimeoutError as exc:
             last_error, timed_out = exc, True
         except Exception as exc:  # noqa: BLE001 — edge-tts resmî olmayan istemci, internet ister
             last_error = exc
-        _cleanup(tmp)
+        finally:
+            _cleanup(tmp)
+
+        if timed_out or use_patched or last_error is None:
+            break
+
         status = getattr(last_error, "status", None)
-        if attempt == 1 and status in (403, 429):
-            logger.warning("TTS HTTP %s, 3 sn sonra tekrar deneniyor", status)
-            await asyncio.sleep(3)
-            continue
-        break
+        logger.warning(
+            "TTS ilk deneme başarısız (%s); yedek uç nokta denenecek", last_error
+        )
+        if status == 429:
+            await asyncio.sleep(_RETRY_SLEEP_S)
 
     if last_error is not None:
         if timed_out:
@@ -168,14 +197,6 @@ async def _synthesize(text: str, voice: str) -> bytes:
         ) from last_error
 
     return target.read_bytes()
-
-
-def _cleanup(path: Path) -> None:
-    try:
-        if path.is_file():
-            path.unlink()
-    except OSError:
-        pass
 
 
 @router.post("/tts")

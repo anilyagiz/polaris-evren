@@ -4,7 +4,11 @@
 Her tool'u registry üzerinden bir kez çağırır ve sonucu yazdırır.
 
 Kullanım:
-    python scripts/test_tools.py
+    python scripts/test_tools.py           # test veritabanı, sonunda silinir
+    python scripts/test_tools.py --keep    # test veritabanını silme
+
+Test, gerçek `backend/data/assistant.db`'yi **kirletmez**: ASSISTANT_DB
+ortam değişkeni geçici bir dosyaya yönlendirilir (bkz. backend/db.py).
 
 Gerekir: backend/.env içinde BRAVE_API_KEY; internet bağlantısı.
 """
@@ -28,6 +32,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower().replace("_", "-") != "utf
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 if os.name == "nt":
     os.system("chcp 65001 >NUL")  # konsol kod sayfası
+
+# Test veritabanı: demo verisini korumak için ayrı dosya.
+TEST_DB = ROOT / "backend" / "data" / "test_tools.db"
 
 from backend.db import load_env  # noqa: E402
 
@@ -66,9 +73,22 @@ def check(label: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+def cleanup_test_db() -> None:
+    """Test veritabanı dosyalarını siler (WAL/SHM dahil)."""
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            Path(f"{TEST_DB}{suffix}").unlink(missing_ok=True)
+        except OSError as exc:  # noqa: BLE001
+            print(f"  [!] test veritabanı silinemedi: {exc}")
+
+
 async def main() -> int:
+    # Gerçek assistant.db'yi kirletmemek için ayrı veritabanı (kullanıcı
+    # ASSISTANT_DB'yi kendisi verdiyse ona dokunmayız).
+    os.environ.setdefault("ASSISTANT_DB", str(TEST_DB))
     load_env()
     print("Kişi 5 — araç testi (web.search, memory.*, reminders.*)\n")
+    print(f"test veritabanı: {os.environ['ASSISTANT_DB']}\n")
     ctx = make_ctx("test_tools")
     results: list[bool] = []
 
@@ -135,6 +155,8 @@ async def main() -> int:
     sample_item = listed_items[0] if listed_items else {}
     list_ok = bool(listed.get("ok")) and all(k in sample_item for k in ("id", "text", "due_iso"))
     results.append(check("reminders.list", list_ok, f"{len(listed_items)} kayıt"))
+    if listed_items:
+        print(f"       due_iso örneği (yerel saat): {sample_item.get('due_iso')}")
 
     # due(): 2 sn sonra dolacak bir hatırlatıcı, bir kez dönmeli
     soon = datetime.now(timezone.utc) + timedelta(seconds=2)
@@ -157,6 +179,11 @@ async def main() -> int:
     ]
     for name, ok in zip(names, results, strict=False):
         print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+
+    if "--keep" in sys.argv:
+        print(f"\n  test veritabanı korundu: {TEST_DB}")
+    else:
+        cleanup_test_db()
     return 0 if all(results) else 1
 
 

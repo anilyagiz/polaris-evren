@@ -4,6 +4,8 @@ Tek veritabanı dosyası: backend/data/assistant.db
 - Klasör yoksa oluşturulur.
 - Her modül kendi tablosunu CREATE TABLE IF NOT EXISTS ile açar.
 - backend/.env dosyasını (K3'ün main.py yüklememiş olsa bile) bir kez okur.
+- ASSISTANT_DB ortam değişkeni verilirse o dosya kullanılır; testler gerçek
+  assistant.db'yi kirletmesin diye eklenmiştir (bkz. scripts/test_tools.py).
 """
 from __future__ import annotations
 
@@ -17,6 +19,8 @@ from typing import Iterator
 # backend/ dizini ve veri yolları
 BACKEND_DIR = Path(__file__).resolve().parent
 DATA_DIR = BACKEND_DIR / "data"
+
+#: Varsayılan veritabanı (testler ASSISTANT_DB ile başka bir dosyaya yönlendirebilir).
 DB_PATH = DATA_DIR / "assistant.db"
 
 _ENV_LOADED = False
@@ -28,6 +32,9 @@ def load_env() -> None:
     Mevcut ortam değişkenlerini ezmez (gerçek os.environ önce gelir).
     python-dotenv'e gerek yoktur; K3 load_dotenv çağırmamış olsa bile
     modüller tek başına çalışsın diye burada desteklenir.
+
+    DİKKAT (K3 için): K3'ün llm.py'si anahtarları okuyorsa, main.py içinde
+    `backend.db.load_env()` import sırasının en başında çağrılmalıdır.
     """
     global _ENV_LOADED
     if _ENV_LOADED:
@@ -61,6 +68,19 @@ def load_env() -> None:
             os.environ[key] = value.strip()
 
 
+def db_path() -> Path:
+    """Kullanılacak veritabanı dosyasını döndürür.
+
+    `ASSISTANT_DB` ortam değişkeni doluysa (mutlak veya göreli yol) o kullanılır.
+    Bu sayede testler demo veritabanına kayıt bırakmaz.
+    """
+    load_env()
+    override = (os.environ.get("ASSISTANT_DB") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return DB_PATH
+
+
 def get_conn() -> sqlite3.Connection:
     """assistant.db için bağlantı açar (klasör yoksa oluşturur).
 
@@ -69,8 +89,9 @@ def get_conn() -> sqlite3.Connection:
             conn.execute("CREATE TABLE IF NOT EXISTS ...")
     """
     load_env()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
