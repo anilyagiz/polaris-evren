@@ -85,9 +85,30 @@ def _register_tools() -> None:
     logger.info("Kayıtlı araçlar (%d): %s", len(names), ", ".join(names) or "-")
 
 
+_shots_mounted = False
+
+
+def ensure_shots_router(target: FastAPI | None = None) -> bool:
+    """Mount GET /shots/{name} once (startup with CUA on, or a live enable from the panel)."""
+
+    global _shots_mounted
+    if _shots_mounted:
+        return True
+    module = _import_module(".cua.shots_router")
+    router = getattr(module, "router", None) if module is not None else None
+    if router is None:
+        return False
+    (target or app).include_router(router)
+    _shots_mounted = True
+    logger.info("Router eklendi: .cua.shots_router.router")
+    return True
+
+
 def _include_optional_routers(target: FastAPI) -> None:
     for module_path, attr in OPTIONAL_ROUTERS:
-        if module_path == ".cua.shots_router" and not settings.cua_enabled:
+        if module_path == ".cua.shots_router":
+            if settings.cua_enabled:
+                ensure_shots_router(target)
             continue
         module = _import_module(module_path)
         if module is None:
@@ -201,6 +222,12 @@ _include_optional_routers(app)
 from .settings_api import router as settings_router  # noqa: E402
 
 app.include_router(settings_router)
+
+# "Masaüstü kontrolü" toggle: install + live CUA on/off (no restart).
+from . import settings_desktop  # noqa: E402
+
+settings_desktop.on_enabled = ensure_shots_router
+app.include_router(settings_desktop.router)
 
 # Polaris desktop window (tray/pywebview) loads the built panel same-origin at /app/.
 from .desktop_app import register as register_desktop_app  # noqa: E402

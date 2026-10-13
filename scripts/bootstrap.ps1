@@ -134,6 +134,7 @@ try {
   $env:UV_HTTP_TIMEOUT = "120"
   $env:UV_NO_PROGRESS = "1"
   $env:UV_NO_CONFIG = "1"
+  $env:UV_LINK_MODE = "copy"   # hardlink yerine kopya: antivirüs kilidiyle (os error 32) çakışmayı azaltır
   $env:VIRTUAL_ENV = $null
   $env:PYTHONUTF8 = "1"
   $env:PYTHONIOENCODING = "utf-8"

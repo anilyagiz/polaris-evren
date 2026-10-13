@@ -97,6 +97,12 @@ def register(tool: Tool) -> None:
     _REGISTRY[tool.name] = tool
 
 
+def unregister(name: str) -> bool:
+    """Remove a tool (live feature toggles such as Masaüstü kontrolü)."""
+
+    return _REGISTRY.pop(name, None) is not None
+
+
 def get(name: str) -> Tool | None:
     """Canonical lookup; accepts both `browser.click` and `browser__click`."""
 

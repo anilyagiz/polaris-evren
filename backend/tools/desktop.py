@@ -1,6 +1,8 @@
 """desktop.* tools (registered only when CUA_ENABLED=true).
 
 CUA_ENABLED is read at import time, so main.py must load backend/.env before importing this module.
+The panel's "Masaüstü kontrolü" toggle (backend/settings_desktop.py) calls
+register_desktop_tools() / unregister_desktop_tools() live, without a restart.
 """
 from __future__ import annotations
 
@@ -11,7 +13,8 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from backend.tools.registry import Tool, ToolContext, register
+from backend.tools.registry import Tool, ToolContext, register, unregister
+from backend.tools.registry import get as _registry_get
 
 logger = logging.getLogger(__name__)
 
@@ -212,12 +215,22 @@ def register_desktop_tools() -> bool:
     if not cua_enabled():
         logger.info("CUA disabled (CUA_ENABLED=false): desktop tools not registered")
         return False
-    if not _registered:
+    if not _registered or any(_registry_get(t.name) is not t for t in TOOLS):
         for tool in TOOLS:
             register(tool)
         _registered = True
         logger.info("CUA enabled: %d desktop tools registered", len(TOOLS))
     return True
+
+
+def unregister_desktop_tools() -> None:
+    """Remove desktop.* tools from the registry (live disable). Idempotent."""
+    global _registered
+    for tool in TOOLS:
+        unregister(tool.name)
+    _registered = False
+    _elements.clear()
+    logger.info("CUA disabled: desktop tools unregistered")
 
 
 register_desktop_tools()

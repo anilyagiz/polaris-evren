@@ -131,7 +131,7 @@ export function parseLlmSettings(value: unknown): LlmSettings | null {
   };
 }
 
-async function request(
+export async function request(
   backend: string,
   path: string,
   init: RequestInit = {},

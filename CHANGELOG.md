@@ -4,6 +4,18 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) esaslıdır; sü
 [Semantik Sürümleme](https://semver.org/lang/tr/) izler. Sürüm numarası
 `extension/manifest.json` ve `backend/config.py` (`APP_VERSION`) ile aynıdır.
 
+## [0.2.1] — 2026-10-13
+
+### Eklendi
+- **Ayarlar → Masaüstü kontrolü:** paketler, Docker ve masaüstü imajının durumu tek kartta;
+  "Kur ve aç" eksikleri ilerleme çubuğuyla kurar, anahtar masaüstü kontrolünü yeniden
+  başlatmadan açıp kapatır. Docker yoksa indirme bağlantısı gösterilir.
+
+### Düzeltildi
+- Kurulumda antivirüs dosya kilidi (`os error 32`) nedeniyle paket kurulumunun yarıda kalması:
+  uv artık dosyaları kopyalayarak kurar ve kilitte yeniden dener.
+- Masaüstü penceresinden verilen masaüstü görevlerinin sohbete yönlendirilmesi.
+
 ## [0.2.0] — 2026-10-13
 
 ### Kurulum

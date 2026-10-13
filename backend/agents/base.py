@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 #: other end of the socket).  Set per request task by the orchestrator.
 BROWSER_AVAILABLE: ContextVar[bool] = ContextVar("polaris_browser_available", default=True)
 NO_BROWSER_NOTE = (
-    "- Tarayıcı erişimi yok (masaüstü penceresi): browser.* araçları ve sekme/sayfa işlemleri "
+    "- Tarayıcı erişimi yok (Polaris uygulama penceresi): browser.* araçları ve sekme/sayfa işlemleri "
     "kullanılamaz. Tarayıcıda yapılması gereken bir iş istenirse kullanıcıya bunun için "
     "Brave'de Polaris panelini açmasını söyle; sohbet, web araması, hafıza ve hatırlatmalar çalışır."
 )
@@ -238,6 +238,8 @@ def build_context_block(
         lines.append("- İlgili hafıza kaydı yok.")
     if not settings.cua_enabled:
         lines.append("- Masaüstü (desktop_*) yetenekleri bu oturumda KAPALI.")
+    else:
+        lines.append("- Sanal Linux masaüstü (desktop_*) yetenekleri AÇIK.")
     if not BROWSER_AVAILABLE.get():
         lines.append(NO_BROWSER_NOTE)
     block = "\n".join(lines)
