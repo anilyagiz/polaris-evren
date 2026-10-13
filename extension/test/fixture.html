@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Asistan Test Sayfası — mekanik klavye</title>
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #64748b;
+        --line: #e2e8f0;
+        --accent: #ff5a1f;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: #fff;
+      }
+      header { border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 24px; }
+      nav a { margin-right: 16px; color: var(--muted); }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      h2 { font-size: 16px; margin: 32px 0 12px; }
+      section { max-width: 760px; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      input, textarea, select, button {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      button { cursor: pointer; background: #f8fafc; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.danger { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+      ul.products { list-style: none; padding: 0; }
+      ul.products li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .price { font-variant-numeric: tabular-nums; color: var(--muted); }
+      .field { display: grid; gap: 4px; margin-bottom: 12px; max-width: 360px; }
+      label { font-size: 13px; color: var(--muted); }
+      .editor {
+        min-height: 72px;
+        padding: 10px;
+        border: 1px dashed var(--line);
+        border-radius: 6px;
+      }
+      .hidden-css { display: none; }
+      .invisible-css { visibility: hidden; }
+      .zero-opacity { opacity: 0; }
+      .log { font: 13px/1.5 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; }
+      footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
+      .tall { height: 1400px; display: flex; align-items: flex-end; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Ana menü">
+        <a href="#urunler">Ürünler</a>
+        <a href="#form">Hesap</a>
+        <a href="#editor">Not</a>
+      </nav>
+      <h1>Asistan Test Sayfası</h1>
+      <p class="log">
+        Bu sayfa K2'nin snapshot/actions kabul testleri içindir. Gerçek bir site değildir.
+      </p>
+    </header>
+
+    <section>
+      <h2>Arama</h2>
+      <form class="row" id="search-form" onsubmit="return false;">
+        <input
+          id="q"
+          name="q"
+          type="search"
+          placeholder="Ara"
+          aria-label="Ürün ara"
+          style="min-width: 260px"
+        />
+        <button class="primary" type="submit">Ara</button>
+        <button type="button" id="clear">Temizle</button>
+      </form>
+      <p class="log" id="search-log">Arama yapılmadı.</p>
+    </section>
+
+    <section id="urunler">
+      <h2>Mekanik klavyeler</h2>
+      <ul class="products">
+        <li>
+          <span>Mekanik Klavye K1 · kırmızı switch</span>
+          <span class="row"><span class="price">1.299 TL</span>
+            <button type="button" data-id="k1">Sepete ekle</button></span>
+        </li>
+        <li>
+          <span>Mekanik Klavye K2 · kahverengi switch</span>
+          <span class="row"><span class="price">1.750 TL</span>
+            <button type="button" data-id="k2">Sepete ekle</button></span>
+        </li>
+        <li>
+          <span>Mekanik Klavye K3 · mavi switch</span>
+          <span class="row"><span class="price">2.100 TL</span>
+            <button type="button" data-id="k3">Sepete ekle</button></span>
+        </li>
+      </ul>
+      <p class="log" id="cart-log">Sepet boş.</p>
+    </section>
+
+    <section id="form">
+      <h2>Hesap formu</h2>
+      <form id="account" onsubmit="return false;">
+        <div class="field">
+          <label for="fullname">Ad soyad</label>
+          <input id="fullname" name="fullname" type="text" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="email">E-posta</label>
+          <input id="email" name="email" type="email" autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="password">Şifre</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" />
+        </div>
+        <div class="field">
+          <label for="card">Kart numarası</label>
+          <input id="card" name="card" type="text" autocomplete="cc-number" />
+        </div>
+        <div class="field">
+          <label for="city">Şehir</label>
+          <select id="city" name="city">
+            <option value="">Seçiniz</option>
+            <option value="ist">İstanbul</option>
+            <option value="ank">Ankara</option>
+            <option value="izm">İzmir</option>
+          </select>
+        </div>
+        <div class="row">
+          <button class="primary" type="submit" id="send">Gönder</button>
+          <button class="danger" type="button" id="delete">Sil</button>
+          <button type="button" disabled>Pasif düğme</button>
+        </div>
+      </form>
+      <p class="log" id="form-log">Form gönderilmedi.</p>
+    </section>
+
+    <section>
+      <h2>React tarzı kontrollü input</h2>
+      <p class="log">
+        Doğrudan <code>el.value = "x"</code> ataması geri alınır. Yalnızca native setter +
+        <code>input</code> olayı ile yazılan değer kalıcıdır.
+      </p>
+      <div class="field">
+        <label for="controlled">Kontrollü alan</label>
+        <input id="controlled" name="controlled" type="text" placeholder="Kontrollü" />
+      </div>
+      <p class="log" id="controlled-log">state: (boş)</p>
+    </section>
+
+    <section id="editor">
+      <h2>Zengin metin alanı</h2>
+      <div class="editor" contenteditable="true" aria-label="Not alanı" id="note">
+        Buraya not yazılabilir.
+      </div>
+    </section>
+
+    <section>
+      <h2>Görünmeyen öğeler (snapshot'ta çıkmamalı)</h2>
+      <button class="hidden-css" type="button">Gizli düğme (display:none)</button>
+      <button class="invisible-css" type="button">Gizli düğme (visibility)</button>
+      <button class="zero-opacity" type="button">Gizli düğme (opacity:0)</button>
+      <button type="button" hidden>Gizli düğme (hidden)</button>
+      <button type="button" aria-hidden="true">Gizli düğme (aria-hidden)</button>
+      <input type="hidden" name="csrf" value="abc123" />
+      <div style="width: 0; height: 0; overflow: hidden">
+        <button type="button">Sıfır boyutlu düğme</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Kaydırma testi</h2>
+      <div class="tall">
+        <button type="button" id="deep">Sayfanın altındaki düğme</button>
+      </div>
+    </section>
+
+    <footer>Asistan test fixture'ı · K2</footer>
+
+    <script>
+      const log = (id, text) => {
+        document.getElementById(id).textContent = text;
+      };
+
+      document.getElementById("search-form").addEventListener("submit", () => {
+        log("search-log", `Arandı: ${document.getElementById("q").value}`);
+      });
+      document.getElementById("clear").addEventListener("click", () => {
+        document.getElementById("q").value = "";
+        log("search-log", "Arama temizlendi.");
+      });
+
+      const cart = [];
+      for (const button of document.querySelectorAll("ul.products button")) {
+        button.addEventListener("click", () => {
+          cart.push(button.dataset.id);
+          log("cart-log", `Sepet: ${cart.join(", ")}`);
+        });
+      }
+
+      document.getElementById("account").addEventListener("submit", () => {
+        log("form-log", "Form gönderildi.");
+      });
+      document.getElementById("delete").addEventListener("click", () => {
+        log("form-log", "Silme tetiklendi.");
+      });
+
+      // React-like controlled input: the component owns the value and reverts
+      // any assignment that did not come with a real input event.
+      (() => {
+        const input = document.getElementById("controlled");
+        let state = "";
+        const render = () => {
+          if (input.value !== state) {
+            input.value = state;
+          }
+          log("controlled-log", `state: ${state === "" ? "(boş)" : state}`);
+        };
+        input.addEventListener("input", (event) => {
+          state = event.target.value;
+          render();
+        });
+        setInterval(render, 100);
+      })();
+
+      document.getElementById("deep").addEventListener("click", () => {
+        log("cart-log", "Alttaki düğmeye basıldı.");
+      });
+    </script>
+  </body>
+</html>

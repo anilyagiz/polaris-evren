@@ -19,3 +19,6 @@ assistant/
 *.db-*
 test-results/
 playwright-report/
+
+# npm lockfile: bu repo pnpm-lock.yaml kullaniyor (K1)
+extension/package-lock.json
