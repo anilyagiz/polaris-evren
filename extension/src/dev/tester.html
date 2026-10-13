@@ -74,8 +74,9 @@
       <div>
         <label for="args">Argümanlar (JSON)</label>
         <textarea id="args" spellcheck="false">{}</textarea>
-        <label for="tabId" style="margin-top: 10px">tabId (boş = aktif sekme)</label>
-        <input id="tabId" inputmode="numeric" placeholder="aktif sekme" />
+        <label for="tabId" style="margin-top: 10px">Hedef sekme</label>
+        <select id="tabId"></select>
+        <button id="refreshTabs" style="margin-top: 6px">Sekmeleri yenile</button>
         <p class="meta" id="meta">Hazır.</p>
         <button class="run" id="run">Çalıştır</button>
       </div>

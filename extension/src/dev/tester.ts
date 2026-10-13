@@ -24,7 +24,8 @@ const PRESETS: Preset[] = [
 
 const toolsEl = document.getElementById("tools") as HTMLDivElement;
 const argsEl = document.getElementById("args") as HTMLTextAreaElement;
-const tabIdEl = document.getElementById("tabId") as HTMLInputElement;
+const tabIdEl = document.getElementById("tabId") as HTMLSelectElement;
+const refreshTabsEl = document.getElementById("refreshTabs") as HTMLButtonElement;
 const runEl = document.getElementById("run") as HTMLButtonElement;
 const outEl = document.getElementById("out") as HTMLPreElement;
 const metaEl = document.getElementById("meta") as HTMLParagraphElement;
@@ -85,6 +86,37 @@ function renderElements(elements: SnapshotElement[]): void {
   elementsEl.appendChild(table);
 }
 
+/**
+ * List the tabs we could drive. The tester page is itself a tab, so leaving the
+ * target implicit would resolve to this page — which the bridge correctly
+ * refuses as a restricted URL. Pick explicitly instead.
+ */
+async function loadTabs(): Promise<void> {
+  const ownPrefix = chrome.runtime.getURL("");
+  const tabs = await chrome.tabs.query({ windowType: "normal" });
+  const usable = tabs.filter(
+    (tab) => tab.id !== undefined && !(tab.url ?? "").startsWith(ownPrefix),
+  );
+
+  tabIdEl.replaceChildren();
+  if (usable.length === 0) {
+    const option = document.createElement("option");
+    option.textContent = "sürülebilir sekme yok — bir sayfa aç";
+    option.value = "";
+    tabIdEl.appendChild(option);
+    return;
+  }
+
+  for (const tab of usable) {
+    const option = document.createElement("option");
+    option.value = String(tab.id);
+    const title = (tab.title ?? tab.url ?? "").slice(0, 60);
+    option.textContent = `${tab.id} · ${title}`;
+    option.selected = tab.active === true;
+    tabIdEl.appendChild(option);
+  }
+}
+
 async function run(): Promise<void> {
   elementsEl.replaceChildren();
   metaEl.className = "meta";
@@ -99,7 +131,12 @@ async function run(): Promise<void> {
   }
 
   const rawTabId = tabIdEl.value.trim();
-  const tabId = rawTabId === "" ? undefined : Number.parseInt(rawTabId, 10);
+  if (rawTabId === "") {
+    metaEl.className = "meta error";
+    metaEl.textContent = "Önce bir hedef sekme seç.";
+    return;
+  }
+  const tabId = Number.parseInt(rawTabId, 10);
 
   runEl.disabled = true;
   metaEl.textContent = `${selected.name} çalışıyor…`;
@@ -128,5 +165,10 @@ runEl.addEventListener("click", () => {
   void run();
 });
 
+refreshTabsEl.addEventListener("click", () => {
+  void loadTabs();
+});
+
 argsEl.value = JSON.stringify(selected.args, null, 2);
 renderTools();
+void loadTabs();
