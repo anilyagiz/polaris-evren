@@ -4,6 +4,26 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) esaslıdır; sü
 [Semantik Sürümleme](https://semver.org/lang/tr/) izler. Sürüm numarası
 `extension/manifest.json` ve `backend/config.py` (`APP_VERSION`) ile aynıdır.
 
+## [0.1.1] — 2026-10-13
+
+### Eklendi
+- **Panelden yapay zeka ayarları:** Ayarlar → "Yapay zeka" bölümünde sağlayıcı
+  (EVREN · DeepSeek · Diğer), API anahtarı (göster/gizle, tek tıkla yapıştır),
+  model kartları, yedek model ve "Hızlı mod". "Bağlantıyı test et" gerçek bir
+  deneme çağrısı yapar; "Kaydet" sunucuyu yeniden başlatmadan devreye girer.
+  `.env` dosyasını elle düzenlemek gerekmez.
+- İlk açılışta anahtar yoksa uyarı kartındaki **"Anahtarı gir"** doğrudan anahtar alanını açar.
+- Başlıkta seçili modelin adı görünür (örn. "Gemma 4 31B").
+- Port yedeği: tepsi uygulaması varsayılan port doluysa sıradaki boş portu seçer,
+  panel Polaris'i kendisi bulur (`/health` → `service: "polaris"`).
+- Masaüstü (CUA) görevlerinde ajan sonucu ekran görüntüsüyle doğrulamadan bitirmez;
+  Xfce klavye kısayollarını kullanır.
+
+### Güvenlik
+- `/settings/*` uçları yalnızca bu bilgisayardan ve Polaris eklentisinden erişilebilir.
+- Anahtar hiçbir yanıtta dönmez (yalnızca son 4 karakter); tarayıcıda saklanmaz.
+- Kayıtlı anahtar yalnızca kayıtlı adrese veya EVREN/DeepSeek'in resmi adreslerine gönderilir.
+
 ## [0.1.0] — 2026-10-13
 
 İlk kullanıma hazır sürüm.
