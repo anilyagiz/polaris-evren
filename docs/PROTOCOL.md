@@ -85,9 +85,13 @@ Backend portu `8765`. Extension backend adresini ayarlardan okur, varsayılan `h
 | WS | `/ws` | aşağıdaki protokol | | K3 |
 | POST | `/stt` | multipart, alan adı `audio` (audio/webm) | `{"text", "language", "duration_s"}` | K5 |
 | POST | `/tts` | JSON `{"text"}` | `audio/mpeg` | K5 |
+| GET | `/settings/llm` | — | `{presets[], provider, base_url, model, fallback_model, thinking: "on"\|"off", api_key_set, api_key_hint, brave_key_set, llm_configured}` (anahtar asla dönmez) | K3 |
+| PUT | `/settings/llm` | JSON, hepsi isteğe bağlı: `{base_url, model, fallback_model ("" / null siler), thinking, api_key (boşsa değişmez), brave_api_key ("" değişmez, null siler)}` | GET ile aynı; `backend/.env` atomik yazılır, yeniden başlatmadan uygulanır. Geçersiz girdi → 422 (Türkçe `detail`) | K3 |
+| POST | `/settings/llm/test` | JSON `{base_url?, model?, api_key?}` (eksikler mevcut ayardan) | `{ok, latency_ms, model, message}` (tek küçük sohbet çağrısı, 20 sn) | K3 |
+| GET | `/settings/llm/models` | `?base_url=&preset=` | `{models: [{id, label, note}], source: "api"\|"preset"}` | K3 |
 | GET | `/shots/{name}` | — | `image/png` (masaüstü ekran görüntüsü, işaretli) | K4 |
 
-CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verilir.
+CORS: yalnızca `chrome-extension://<id>` ve localhost origin'lerine izin verilir. `/settings/*` ayrıca loopback olmayan istemcileri ve izin dışı `Origin` başlığını 403 ile reddeder; gövde ≤ 4 KB.
 
 ## 6. WebSocket protokolü (DONMUŞ)
 

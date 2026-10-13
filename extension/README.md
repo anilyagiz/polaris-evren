@@ -54,8 +54,17 @@ Kod değiştirdikten sonra yeniden derle ve `brave://extensions` içinde uzantı
 
 ### Ayarlar (dişli simgesi)
 
-- **Sunucu adresi:** yalnızca `http://` veya `https://`. **Bağlantıyı test et** düğmesi `/health`'i dener.
+- **Yapay zeka** (en üstte): sağlayıcı seç (**EVREN · DeepSeek · Diğer**), API anahtarını
+  **Yapıştır** ile yapıştır, modeli kartlardan seç (**Önerilen** rozeti), istersen **Yedek model**
+  ve **Hızlı mod** (gizli düşünmeyi kapatır) ayarla. **Bağlantıyı test et** (anahtar alanında
+  Enter) sağlayıcıyı dener; **Kaydet** ayarları sunucuya canlı uygular, yeniden başlatma gerekmez.
+  Anahtar yalnızca kendi Polaris sunucuna gönderilir; tarayıcıda saklanmaz. Kayıtlı anahtar
+  "Anahtar kayıtlı · …X45NMo" olarak görünür, **Değiştir** ile yenilenir.
+  İlk kurulumda anahtar yoksa sohbetin üstündeki kartta **Anahtarı gir** doğrudan bu alanı açar.
+  (Eski sunucu sürümünde "Sunucuyu güncelle" notu görünür; diğer ayarlar çalışmaya devam eder.)
 - **Sesli yanıt:** cevapları Türkçe sesli okur.
+- **Gelişmiş:** sunucu adresi (yalnızca `http://` veya `https://`; **Sunucuyu test et** `/health`'i
+  dener) ve isteğe bağlı Brave Search anahtarı.
 - Alt kısımda uzantı sürümü (manifest'ten) görünür.
 
 **Port notu:** Uzantının güvenlik politikası (CSP) `localhost` ve `127.0.0.1` üzerindeki
@@ -79,7 +88,7 @@ Cevapların altında **Kopyala** ve **Sesli oku**; başlıkta **Sohbeti temizle*
 |---|---|
 | "Polaris sunucusu çalışmıyor" | Sunucu açık mı? Tarayıcıda <http://127.0.0.1:8765/health> → `{"ok": true, ...}` dönmeli. Ayarlar'daki adresi kontrol et |
 | Rozet sürekli "Bağlanıyor/Kopuk" ama `/health` açılıyor | Ayarlar'daki adres ile sunucu adresi aynı mı (`localhost` / `127.0.0.1`, port)? Uzantıyı yenile |
-| "Yapay zekâ anahtarı kabul edilmedi" / "Model ayarı hatalı" | `backend\.env`: `DEEPSEEK_API_KEY`, `LLM_MODEL`, `DEEPSEEK_BASE_URL`; değiştirince sunucuyu yeniden başlat |
+| "Yapay zekâ anahtarı kabul edilmedi" / "Model ayarı hatalı" | Ayarlar → Yapay zeka: anahtarı **Değiştir**, modeli kontrol et, **Bağlantıyı test et**. (Alternatif: `backend\.env` + sunucuyu yeniden başlat) |
 | "Yapay zekâ servisi şu an yoğun" (429) | Birkaç saniye bekleyip tekrar dene |
 | Zaman çizelgesinde "Araç başarısız" | Adımın altındaki açıklamayı oku; çoğunlukla sayfa okunamadı ya da zaman aşımı. Normal bir `https://` sekmesinde tekrar dene |
 | Uzantı sayfayı okuyamıyor | `brave://` ve mağaza sayfalarında içerik betiği çalışmaz. Normal bir sayfa aç ve yenile |

@@ -404,7 +404,29 @@ def get_llm() -> LLMClient:
     global _CLIENT
     if _CLIENT is None:
         _CLIENT = LLMClient()
+        _CLIENT._from_settings = True  # type: ignore[attr-defined]
     return _CLIENT
+
+
+def reload_llm() -> None:
+    """Point the shared client at the current settings (after /settings/llm PUT).
+
+    Reconfigured in place so open conversations (orchestrators and agents keep
+    a reference to the same instance) pick up the new key/URL/model on their
+    next call.  Clients injected via :func:`set_llm` (tests, CLI stubs) are
+    left alone.
+    """
+
+    client = _CLIENT
+    if client is None or not getattr(client, "_from_settings", False):
+        return
+    settings = get_settings()
+    client.api_key = settings.deepseek_api_key
+    client.base_url = settings.deepseek_base_url
+    client.model = settings.llm_model
+    client.timeout_s = settings.llm_timeout_s
+    # The old SDK object keeps serving any in-flight call; new calls build a fresh one.
+    client._client = None
 
 
 def set_llm(client: LLMClient | None) -> None:

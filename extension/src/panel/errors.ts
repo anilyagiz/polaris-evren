@@ -14,12 +14,12 @@ const rules: Array<[RegExp, string, string]> = [
   [
     /deepseek_api_key|kimlik doğrulama|unauthori[sz]ed|\b40[13]\b|api.?key/i,
     "Yapay zekâ anahtarı kabul edilmedi",
-    "backend/.env içindeki DEEPSEEK_API_KEY değerini kontrol et ve sunucuyu yeniden başlat.",
+    "Ayarlar → Yapay zeka bölümünden anahtarını kontrol et ya da yenisini yapıştır.",
   ],
   [
     /llm_model|deepseek_base_url|bulunamadı.*model|model.*bulunamadı|\b404\b/i,
     "Model ayarı hatalı",
-    "backend/.env içinde LLM_MODEL ve DEEPSEEK_BASE_URL değerlerini kontrol et, sunucuyu yeniden başlat.",
+    "Ayarlar → Yapay zeka bölümünden sağlayıcıyı ve modeli kontrol et.",
   ],
   [
     /zaman aşımı|timeout|timed out/i,
@@ -34,7 +34,7 @@ const rules: Array<[RegExp, string, string]> = [
   [
     /bağlanılamadı|connection|internet/i,
     "Yapay zekâ servisine ulaşılamadı",
-    "İnternet bağlantını ve backend/.env içindeki DEEPSEEK_BASE_URL değerini kontrol et.",
+    "İnternet bağlantını ve Ayarlar → Yapay zeka bölümündeki sağlayıcı adresini kontrol et.",
   ],
   [
     /geçerli json döndürmedi|boş\/bozuk/i,

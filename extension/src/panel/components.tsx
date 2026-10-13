@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Copy,
   ExternalLink,
+  KeyRound,
   LoaderCircle,
   PlugZap,
   RefreshCw,
@@ -38,6 +39,8 @@ import {
   isLocalBackend,
   type Settings,
 } from "./settings";
+import { prettyModel, type LlmSettings } from "./llm";
+import { LlmSection, useLlmDraft } from "./LlmSettings";
 
 /** Four-pointed north star used as the brand mark. */
 export function PolarisMark({ size = 20 }: { size?: number }) {
@@ -269,18 +272,28 @@ export function SettingsModal({
   busy,
   onSave,
   onClose,
+  focusKey = false,
+  onLlmSaved,
 }: {
   current: Settings;
   busy: boolean;
   onSave: (settings: Settings) => Promise<void>;
   onClose: () => void;
+  /** Open with the API key field focused (first-run "Anahtarı gir"). */
+  focusKey?: boolean;
+  onLlmSaved?: (settings: LlmSettings) => void;
 }) {
   const [draft, setDraft] = useState(current);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
+  const llm = useLlmDraft(current.backend);
+  const llmUnavailable =
+    llm.load.kind === "missing" || llm.load.kind === "error";
+  const [advanced, setAdvanced] = useState(false);
   const urlError = backendError(draft.backend);
   const remote = !urlError && !isLocalBackend(draft.backend);
+  const showAdvanced = advanced || llmUnavailable || Boolean(urlError);
   const runTest = async () => {
     if (urlError) return;
     setTest({ kind: "testing" });
@@ -299,18 +312,28 @@ export function SettingsModal({
       });
   };
   return (
-    <Modal title="Ayarlar" onClose={onClose}>
+    <Modal title="Ayarlar" onClose={onClose} className="settings-modal">
       <form
         noValidate
         onSubmit={async (event) => {
           event.preventDefault();
-          if (urlError) return;
+          if (urlError || saving) return;
           setSaving(true);
           setError("");
+          let savedLlm: LlmSettings | null = null;
+          try {
+            savedLlm = await llm.save();
+          } catch {
+            // The section shows the server's (Turkish) reason inline.
+            setSaving(false);
+            return;
+          }
           try {
             await onSave({ ...draft, backend: normalizeBackend(draft.backend) });
+            if (savedLlm) onLlmSaved?.(savedLlm);
             onClose();
           } catch (cause) {
+            if (savedLlm) onLlmSaved?.(savedLlm);
             setError(
               cause instanceof Error ? cause.message : "Ayarlar kaydedilemedi.",
             );
@@ -319,6 +342,37 @@ export function SettingsModal({
           }
         }}
       >
+        <LlmSection llm={llm} focusKey={focusKey} />
+        <label className="setting-row">
+          <span>
+            <strong>Sesli yanıt</strong>
+            <small>Cevapları Türkçe sesli oku.</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            className="switch"
+            checked={draft.speak}
+            onChange={(event) =>
+              setDraft({ ...draft, speak: event.target.checked })
+            }
+          />
+        </label>
+        <button
+          type="button"
+          className="disclosure"
+          aria-expanded={showAdvanced}
+          aria-controls="settings-advanced"
+          onClick={() => setAdvanced(!showAdvanced)}
+        >
+          <span>
+            <strong>Gelişmiş</strong>
+            <small>Sunucu adresi, web arama anahtarı</small>
+          </span>
+          <ChevronDown size={16} className={showAdvanced ? "rotated" : ""} />
+        </button>
+        {showAdvanced && (
+        <div id="settings-advanced" className="advanced">
         <section className="settings-group">
           <label className="field-label" htmlFor="backend">
             Sunucu adresi
@@ -351,7 +405,7 @@ export function SettingsModal({
               ) : (
                 <PlugZap size={14} />
               )}
-              Bağlantıyı test et
+              Sunucuyu test et
             </button>
           </div>
           <p id="backend-help" className={urlError ? "field-error" : "field-help"}>
@@ -371,21 +425,35 @@ export function SettingsModal({
             </p>
           )}
         </section>
-        <label className="setting-row">
-          <span>
-            <strong>Sesli yanıt</strong>
-            <small>Cevapları Türkçe sesli oku.</small>
-          </span>
-          <input
-            type="checkbox"
-            role="switch"
-            className="switch"
-            checked={draft.speak}
-            onChange={(event) =>
-              setDraft({ ...draft, speak: event.target.checked })
-            }
-          />
-        </label>
+        {llm.load.kind === "ready" && (
+          <section className="settings-group">
+            <label className="field-label" htmlFor="brave-key">
+              Brave Search anahtarı{" "}
+              <span className="optional">isteğe bağlı</span>
+            </label>
+            <input
+              id="brave-key"
+              type="password"
+              className="text-input mono"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder={
+                llm.load.saved.brave_key_set
+                  ? "Kayıtlı · değiştirmek için yenisini yaz"
+                  : "BSA…"
+              }
+              value={llm.braveKey}
+              onChange={(event) => llm.setBraveKey(event.target.value.trim())}
+            />
+            <p className="field-help">
+              {llm.load.saved.brave_key_set
+                ? "Web arama Brave API ile yapılıyor."
+                : "Boşsa web arama anahtarsız DuckDuckGo ile yapılır."}
+            </p>
+          </section>
+        )}
+        </div>
+        )}
         {busy && (
           <p className="field-help">
             Bağlantı ayarlarını değiştirmek için mevcut görevin bitmesini bekle.
@@ -396,14 +464,22 @@ export function SettingsModal({
             {error}
           </p>
         )}
-        <button
-          className="primary full"
-          type="submit"
-          disabled={saving || Boolean(urlError)}
-        >
-          {saving ? "Kaydediliyor…" : "Kaydet"}
-        </button>
-        <p className="version-line">Polaris sürüm {extensionVersion()}</p>
+        <div className="settings-footer">
+          <button
+            className="primary full"
+            type="submit"
+            disabled={saving || Boolean(urlError)}
+          >
+            {saving ? (
+              <>
+                <LoaderCircle size={15} className="spin" /> Kaydediliyor…
+              </>
+            ) : (
+              "Kaydet"
+            )}
+          </button>
+          <p className="version-line">Polaris sürüm {extensionVersion()}</p>
+        </div>
       </form>
     </Modal>
   );
@@ -415,11 +491,14 @@ export function HealthCard({
   backend,
   checking,
   onRetry,
+  onEnterKey,
 }: {
   health: HealthState;
   backend: string;
   checking: boolean;
   onRetry: () => void;
+  /** Opens Ayarlar focused on the API key field. */
+  onEnterKey?: () => void;
 }) {
   const retry = (
     <button className="secondary compact" onClick={onRetry} disabled={checking}>
@@ -470,12 +549,23 @@ export function HealthCard({
           <div>
             <h3 id="health-title">Yapay zekâ anahtarı ayarlı değil</h3>
             <p>
-              <code>backend/.env</code> içine <code>DEEPSEEK_API_KEY</code> ve{" "}
-              <code>LLM_MODEL</code> yaz, sunucuyu yeniden başlat.
+              Polaris’in düşünebilmesi için bir yapay zekâ anahtarı gerekiyor.
+              Anahtarını yapıştır, modelini seç — yeniden başlatma gerekmez.
             </p>
           </div>
         </div>
-        <div className="health-actions">{retry}</div>
+        <div className="health-actions">
+          {onEnterKey && (
+            <button className="primary compact" onClick={onEnterKey}>
+              <KeyRound size={14} /> Anahtarı gir
+            </button>
+          )}
+          {retry}
+        </div>
+        <p className="health-note">
+          Geliştiriciysen alternatif: <code>backend/.env</code> içine{" "}
+          <code>DEEPSEEK_API_KEY</code> yazıp sunucuyu yeniden başlat.
+        </p>
       </section>
     );
   return null;
@@ -516,7 +606,17 @@ export function StatusPopover({
     return () => document.removeEventListener("mousedown", down);
   }, []);
   const info = health.kind === "ok" ? health.health : null;
-  const rows: Array<[string, string | null]> = [
+  const modelName = info?.llm_model ? (
+    <span className="model-value">
+      {prettyModel(info.llm_model)}
+      {prettyModel(info.llm_model) !== info.llm_model && (
+        <code>{info.llm_model}</code>
+      )}
+    </span>
+  ) : info ? (
+    "—"
+  ) : null;
+  const rows: Array<[string, ReactNode]> = [
         ["Sunucu", settings.backend],
         [
           "Bağlantı",
@@ -532,7 +632,7 @@ export function StatusPopover({
               ? "Kontrol ediliyor"
               : "Ulaşılamıyor",
         ],
-        ["Model", info?.llm_model ?? (info ? "—" : null)],
+        ["Model", modelName],
         ["Yapay zekâ", info ? onOff(info.llm_configured, "Hazır", "Anahtar yok") : null],
         ["Masaüstü (CUA)", info ? onOff(info.cua_enabled, "Açık", "Kapalı") : null],
         ["Ses tanıma", info ? onOff(info.stt_ready, "Hazır", "Hazır değil") : null],
@@ -549,7 +649,7 @@ export function StatusPopover({
     >
       <dl>
         {rows
-          .filter((row): row is [string, string] => row[1] !== null)
+          .filter((row) => row[1] !== null)
           .map(([label, value]) => (
             <div key={label}>
               <dt>{label}</dt>

@@ -198,6 +198,10 @@ app.add_middleware(
 _register_tools()
 _include_optional_routers(app)
 
+from .settings_api import router as settings_router  # noqa: E402
+
+app.include_router(settings_router)
+
 
 def _stt_ready() -> bool:
     """Is the Whisper model already loaded?  Never triggers a (slow) load."""
@@ -217,6 +221,7 @@ def _tts_available() -> bool:
 async def health() -> dict[str, Any]:
     """Liveness probe (the panel and the demo script both use it)."""
 
+    settings = get_settings()  # not the import-time snapshot: /settings/llm reloads live
     return {
         "ok": True,
         "service": "polaris",

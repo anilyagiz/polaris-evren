@@ -137,6 +137,13 @@ def get_settings() -> Settings:
     )
 
 
+def reload_settings() -> Settings:
+    """Drop the cached snapshot and re-read ``os.environ`` (live settings change)."""
+
+    get_settings.cache_clear()
+    return get_settings()
+
+
 def config_warnings(settings: Settings | None = None) -> list[str]:
     """Turkish, human-readable problems with the configuration.
 

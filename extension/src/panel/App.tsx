@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
+  Check,
   CircleStop,
   LoaderCircle,
   Mic,
@@ -25,6 +26,7 @@ import {
 } from "./components";
 import { friendlyError, type FriendlyError } from "./errors";
 import { checkHealth, discoverBackend, type HealthState } from "./health";
+import { prettyModel } from "./llm";
 import {
   normalizeBackend,
   requestId,
@@ -106,7 +108,10 @@ export default function App({
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const [ready, setReady] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState<
+    false | "general" | "api-key"
+  >(false);
+  const [toast, setToast] = useState("");
   const [showStatus, setShowStatus] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const statusRef = useRef(status);
@@ -369,6 +374,11 @@ export default function App({
   useEffect(() => {
     if (!settings.speak) speakerRef.current.stop();
   }, [settings.speak]);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(""), 3200);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const applySettings = async (next: Settings) => {
     const normalized = { ...next, backend: normalizeBackend(next.backend) };
@@ -600,6 +610,10 @@ export default function App({
             disconnected: "Kopuk",
           }[status];
   const canSend = status === "connected" && !serverDown;
+  const modelLabel =
+    health.kind === "ok" && health.health.llm_model && !llmMissing
+      ? prettyModel(health.health.llm_model)
+      : null;
 
   return (
     <main className="app-shell">
@@ -610,7 +624,12 @@ export default function App({
           </span>
           <div>
             <h1>Polaris</h1>
-            <span className="brand-subtitle">Kişisel asistan</span>
+            <span
+              className={`brand-subtitle ${modelLabel ? "has-model" : ""}`}
+              title={modelLabel ? "Etkin model" : undefined}
+            >
+              {modelLabel ?? "Kişisel asistan"}
+            </span>
           </div>
         </div>
         <div className="header-actions">
@@ -638,7 +657,7 @@ export default function App({
             className="icon-button"
             aria-label="Ayarlar"
             title="Ayarlar"
-            onClick={() => setShowSettings(true)}
+            onClick={() => setShowSettings("general")}
           >
             <SettingsIcon size={17} />
           </button>
@@ -672,6 +691,7 @@ export default function App({
             backend={settings.backend}
             checking={healthChecking}
             onRetry={() => void runHealth()}
+            onEnterKey={() => setShowSettings("api-key")}
           />
         {requests.length === 0 && (
           <div className="welcome">
@@ -919,9 +939,19 @@ export default function App({
         <SettingsModal
           current={settings}
           busy={busy}
+          focusKey={showSettings === "api-key"}
           onClose={() => setShowSettings(false)}
           onSave={applySettings}
+          onLlmSaved={(saved) => {
+            setToast(`Kaydedildi · model ${saved.model}`);
+            void runHealth();
+          }}
         />
+      )}
+      {toast && (
+        <div className="toast" role="status" key={toast}>
+          <Check size={14} /> {toast}
+        </div>
       )}
       {pending && (
         <ConfirmModal
