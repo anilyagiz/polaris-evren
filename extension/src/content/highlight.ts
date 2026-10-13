@@ -17,6 +17,7 @@ const STYLE = `
   :host { all: initial; }
   .box {
     position: fixed;
+    display: block;
     box-sizing: border-box;
     border: 3px solid #ff5a1f;
     border-radius: 6px;
@@ -59,25 +60,77 @@ function ensureShadow(): ShadowRoot {
   return root;
 }
 
+/** Put the box over the element's *current* viewport rect. */
+function placeBox(box: HTMLElement, element: HTMLElement): void {
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) {
+    // Detached or collapsed mid-blink: a 4×4 artifact in the corner would be
+    // worse than showing nothing.
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "block";
+  box.style.left = `${Math.round(rect.left) - 2}px`;
+  box.style.top = `${Math.round(rect.top) - 2}px`;
+  box.style.width = `${Math.round(rect.width) + 4}px`;
+  box.style.height = `${Math.round(rect.height) + 4}px`;
+}
+
+/**
+ * Keep the box glued to the element until it is removed, and return the stopper.
+ *
+ * Two reasons this cannot be a one-off measurement: `scrollIntoView()` honours
+ * the page's `scroll-behavior: smooth`, so the rect taken right after it is
+ * mid-animation (measured ~290 px off on a 400 ms scroll), and anything that
+ * moves afterwards — the user scrolling, a sticky header collapsing, a lazy
+ * image reflowing the column — would leave the box pointing at the wrong thing
+ * for the rest of the blink.
+ */
+function followElement(box: HTMLElement, element: HTMLElement): () => void {
+  if (typeof requestAnimationFrame !== "function") {
+    return () => {};
+  }
+
+  let frame = requestAnimationFrame(function tick(): void {
+    if (!box.isConnected) {
+      return;
+    }
+    placeBox(box, element);
+    frame = requestAnimationFrame(tick);
+  });
+
+  return () => cancelAnimationFrame(frame);
+}
+
 /** Draw a blinking box over `element`; resolves once it is removed. */
 export async function highlightElement(element: HTMLElement): Promise<void> {
   await scrollIntoView(element);
 
   const root = ensureShadow();
-  const rect = element.getBoundingClientRect();
+  // One marker at a time: back-to-back highlight calls overlap by design (each
+  // one blinks for 1.5 s), and a stale box next to the new one points the user
+  // at the previous element.
+  for (const stale of Array.from(root.querySelectorAll(".box"))) {
+    stale.remove();
+  }
+
   const box = document.createElement("div");
   box.className = "box";
-  box.style.left = `${Math.round(rect.left) - 2}px`;
-  box.style.top = `${Math.round(rect.top) - 2}px`;
-  box.style.width = `${Math.round(rect.width) + 4}px`;
-  box.style.height = `${Math.round(rect.height) + 4}px`;
+  placeBox(box, element);
   root.appendChild(box);
 
-  await delay(BLINK_MS);
-  box.remove();
+  const stopFollowing = followElement(box, element);
+  try {
+    await delay(BLINK_MS);
+  } finally {
+    stopFollowing();
+    box.remove();
 
-  if (root.querySelectorAll(".box").length === 0) {
-    root.host.remove();
-    shadow = null;
+    if (root.querySelectorAll(".box").length === 0 && root.host.isConnected) {
+      root.host.remove();
+      if (shadow === root) {
+        shadow = null;
+      }
+    }
   }
 }

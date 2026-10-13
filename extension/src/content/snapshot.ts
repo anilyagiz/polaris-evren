@@ -98,8 +98,17 @@ function valueOf(element: HTMLElement): string | null {
 /**
  * 0 = inside the viewport, 1 = within one screen below it, 2 = anywhere else.
  * Stable sorting keeps DOM order inside each bucket, which reads naturally.
+ *
+ * Both axes count. A closed off-canvas drawer (`left: -320px`, or translated
+ * out) overlaps the viewport vertically, so judging on `top`/`bottom` alone put
+ * its whole link list in bucket 0 — ahead of the search box actually on screen,
+ * and ahead of everything the 150-element budget then had no room for.
+ * Scrolling can reach a row below the fold; it cannot reach a closed drawer.
  */
-function priorityOf(rect: DOMRect, viewportHeight: number): number {
+function priorityOf(rect: DOMRect, viewportWidth: number, viewportHeight: number): number {
+  if (rect.right <= 0 || rect.left >= viewportWidth) {
+    return 2;
+  }
   if (rect.bottom > 0 && rect.top < viewportHeight) {
     return 0;
   }
@@ -112,33 +121,32 @@ function priorityOf(rect: DOMRect, viewportHeight: number): number {
 /**
  * Drop wrappers that duplicate an inner candidate (e.g. `<a>` around a
  * `<button>` with the same label): the innermost one is the better target.
+ *
+ * Walking each candidate's ancestor chain picks out exactly the same wrappers
+ * as comparing every pair inside a same-name bucket, at O(candidates × depth)
+ * instead of O(bucket²): a product grid of 150 identically labelled "Sepete
+ * ekle" cards (450 candidates, one bucket) spent ~135k `contains()` calls to
+ * reach this answer, and 600 cards ~960k.
  */
 function dropRedundantAncestors(candidates: Candidate[]): Candidate[] {
-  const byName = new Map<string, Candidate[]>();
+  const byElement = new Map<Element, Candidate>();
+  for (const candidate of candidates) {
+    if (candidate.name !== "") {
+      byElement.set(candidate.element, candidate);
+    }
+  }
+
+  const redundant = new Set<Element>();
   for (const candidate of candidates) {
     if (candidate.name === "") {
       continue;
     }
-    const bucket = byName.get(candidate.name);
-    if (bucket === undefined) {
-      byName.set(candidate.name, [candidate]);
-    } else {
-      bucket.push(candidate);
-    }
-  }
-
-  const redundant = new Set<HTMLElement>();
-  for (const bucket of byName.values()) {
-    if (bucket.length < 2) {
-      continue;
-    }
-    for (const outer of bucket) {
-      for (const inner of bucket) {
-        if (outer !== inner && outer.element.contains(inner.element)) {
-          redundant.add(outer.element);
-          break;
-        }
+    let parent = candidate.element.parentElement;
+    while (parent !== null) {
+      if (byElement.get(parent)?.name === candidate.name) {
+        redundant.add(parent);
       }
+      parent = parent.parentElement;
     }
   }
 
@@ -154,15 +162,32 @@ function clearPreviousRefs(): void {
 export function takeSnapshot(): Snapshot {
   clearPreviousRefs();
 
+  const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const nodes = Array.from(document.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR)).slice(
-    0,
-    MAX_CANDIDATES,
+
+  // Measure first, inspect second. Reading a rect is cheap once layout is up to
+  // date; the expensive part per candidate is `isVisible()` (a computed style
+  // per ancestor) and `accessibleName()` (`innerText`). So the budget is spent
+  // on the nodes nearest the viewport instead of on the first 1200 in DOM
+  // order: on a long page the user has already scrolled through — an infinite
+  // feed, a big catalogue — everything on screen sits *past* node 1200, and a
+  // DOM-order cut handed the LLM 150 refs from the top of the page and nothing
+  // it could actually see.
+  const measured = Array.from(document.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR)).map(
+    (element) => {
+      const rect = element.getBoundingClientRect();
+      return { element, rect, priority: priorityOf(rect, viewportWidth, viewportHeight) };
+    },
   );
+  if (measured.length > MAX_CANDIDATES) {
+    // Stable, so DOM order survives inside each priority bucket.
+    measured.sort((a, b) => a.priority - b.priority);
+    measured.length = MAX_CANDIDATES;
+  }
 
   const candidates: Candidate[] = [];
-  for (const element of nodes) {
-    if (isDisabled(element) || !isVisible(element)) {
+  for (const { element, rect, priority } of measured) {
+    if (isDisabled(element) || !isVisible(element, rect)) {
       continue;
     }
     const role = roleOf(element);
@@ -170,15 +195,7 @@ export function takeSnapshot(): Snapshot {
     if (name === "" && !NAMELESS_ALLOWED_ROLES.has(role)) {
       continue;
     }
-    const rect = element.getBoundingClientRect();
-    candidates.push({
-      element,
-      role,
-      name,
-      value: valueOf(element),
-      rect,
-      priority: priorityOf(rect, viewportHeight),
-    });
+    candidates.push({ element, role, name, value: valueOf(element), rect, priority });
   }
 
   const ordered = dropRedundantAncestors(candidates)

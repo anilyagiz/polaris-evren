@@ -27,9 +27,7 @@ async function openPanelInTab(): Promise<void> {
   const first = existing[0];
   if (first?.id !== undefined) {
     await chrome.tabs.update(first.id, { active: true });
-    if (first.windowId !== undefined) {
-      await chrome.windows.update(first.windowId, { focused: true });
-    }
+    await chrome.windows.update(first.windowId, { focused: true });
     return;
   }
   await chrome.tabs.create({ url });
@@ -51,12 +49,46 @@ async function enableSidePanel(): Promise<boolean> {
 }
 
 /**
- * When `openPanelOnActionClick` is active the click never reaches us, so this
- * listener only fires on the fallback path. Registering it unconditionally at
- * the top level is required by MV3 (listeners must be sync on worker startup).
+ * Open the real side panel for the clicked window.
+ *
+ * `chrome.sidePanel.open()` only works while a user gesture is live, which an
+ * `action.onClicked` handler still has.
  */
-chrome.action.onClicked.addListener(() => {
-  void openPanelInTab();
+async function openSidePanelNow(windowId: number): Promise<boolean> {
+  if (chrome.sidePanel?.open === undefined || windowId === chrome.windows.WINDOW_ID_NONE) {
+    return false;
+  }
+  try {
+    await chrome.sidePanel.open({ windowId });
+    return true;
+  } catch (error) {
+    console.warn(LOG, "sidePanel.open başarısız:", error);
+    return false;
+  }
+}
+
+/**
+ * When `openPanelOnActionClick` is active the click never reaches us, so
+ * reaching this listener means the side panel did NOT open by itself.
+ *
+ * Do not jump straight to the tab fallback: if a Chromium fork fires the click
+ * anyway, the user ends up with the panel AND a full tab copy of it, i.e. two
+ * panel instances each opening their own backend WebSocket session. Try the
+ * real API once (the user gesture is still live) and only then fall back.
+ *
+ * Registering the listener unconditionally at the top level is required by MV3
+ * (listeners must be added synchronously on worker startup).
+ */
+chrome.action.onClicked.addListener((tab) => {
+  void (async () => {
+    if (await openSidePanelNow(tab.windowId)) {
+      return;
+    }
+    await openPanelInTab();
+  })().catch((error: unknown) => {
+    // Nothing else can report this: an unhandled rejection here is invisible.
+    console.warn(LOG, "panel açılamadı:", error);
+  });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -69,21 +101,69 @@ chrome.runtime.onStartup.addListener(() => {
   void enableSidePanel();
 });
 
-// The worker can be respawned without onInstalled/onStartup firing.
+// The worker can be respawned without onInstalled/onStartup firing. The call is
+// idempotent (Chrome persists the behavior), so repeating it on every wake is
+// harmless, and being cut short by worker termination costs nothing.
 void enableSidePanel();
+
+const BACKGROUND_MESSAGE_NAMES = ["openPanelTab", "activeTab"] as const;
+
+type BackgroundMessageName = (typeof BACKGROUND_MESSAGE_NAMES)[number];
 
 interface BackgroundMessage {
   kind: "bg";
-  name: "openPanelTab" | "activeTab";
+  name: BackgroundMessageName;
 }
 
 function isBackgroundMessage(value: unknown): value is BackgroundMessage {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { kind?: unknown; name?: unknown };
+  // Check the name against the real union: a predicate that only tests
+  // `typeof name === "string"` lies to every caller downstream.
   return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === "bg" &&
-    typeof (value as { name?: unknown }).name === "string"
+    candidate.kind === "bg" &&
+    (BACKGROUND_MESSAGE_NAMES as readonly unknown[]).includes(candidate.name)
   );
+}
+
+/** Our own pages must never be reported as "the tab the user is looking at". */
+function isOwnPage(url: string | undefined): boolean {
+  if (url === undefined || url === "") {
+    return false;
+  }
+  return url.startsWith(chrome.runtime.getURL(""));
+}
+
+/**
+ * Resolve the tab the user is actually on.
+ *
+ * `{active: true, lastFocusedWindow: true}` alone returns the panel's own tab
+ * when the panel runs as a tab (the Brave fallback), and the devtools/popup
+ * tab when such a window has focus.
+ */
+async function findActiveTab(): Promise<chrome.tabs.Tab | null> {
+  const queries: chrome.tabs.QueryInfo[] = [
+    { active: true, lastFocusedWindow: true, windowType: "normal" },
+    { active: true, currentWindow: true, windowType: "normal" },
+    { active: true, windowType: "normal" },
+  ];
+  for (const query of queries) {
+    let tabs: chrome.tabs.Tab[] = [];
+    try {
+      tabs = await chrome.tabs.query(query);
+    } catch {
+      continue;
+    }
+    const match = tabs.find(
+      (tab) => tab.id !== undefined && tab.id !== chrome.tabs.TAB_ID_NONE && !isOwnPage(tab.url),
+    );
+    if (match !== undefined) {
+      return match;
+    }
+  }
+  return null;
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
@@ -100,10 +180,10 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   }
 
   if (message.name === "activeTab") {
-    void chrome.tabs
-      .query({ active: true, lastFocusedWindow: true })
-      .then((tabs) => sendResponse({ ok: true, data: tabs[0] ?? null, error: null }))
-      .catch((error: unknown) => sendResponse({ ok: false, data: null, error: String(error) }));
+    void findActiveTab().then(
+      (tab) => sendResponse({ ok: true, data: tab, error: null }),
+      (error: unknown) => sendResponse({ ok: false, data: null, error: String(error) }),
+    );
     return true;
   }
 

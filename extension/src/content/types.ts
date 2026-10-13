@@ -84,15 +84,18 @@ export interface ToolResponse<T = unknown> {
 export interface ToolMessage {
   kind: "tool";
   name: string;
-  args: Record<string, unknown>;
+  /**
+   * Deliberately `unknown`: `chrome.tabs.sendMessage` carries whatever the
+   * caller passed (including `null`, an array or a string), so the router
+   * normalizes this to a plain object before any handler sees it.
+   */
+  args: unknown;
 }
 
 /** Content-script liveness probe used by the injection fallback. */
 export interface PingMessage {
   kind: "ping";
 }
-
-export type ContentMessage = ToolMessage | PingMessage;
 
 /** Limits from the contract. */
 export const MAX_ELEMENTS = 150;

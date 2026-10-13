@@ -6,7 +6,13 @@
  * into a tab that already had it from the manifest.
  */
 
-import { type ToolMessage, type ToolResponse, fail, ok } from "./types";
+import {
+  type PingMessage,
+  type ToolMessage,
+  type ToolResponse,
+  fail,
+  ok,
+} from "./types";
 import * as actions from "./actions";
 import { takeSnapshot } from "./snapshot";
 
@@ -18,23 +24,33 @@ declare global {
 
 const LOG = "[content]";
 
-function isToolMessage(value: unknown): value is ToolMessage {
+/**
+ * `kind: "tool"` is ours alone (the service worker uses `kind: "bg"`), so we
+ * claim such a message even when the rest of it is malformed — the contract
+ * requires an envelope back, never a silently closed port.
+ */
+function isToolKind(value: unknown): value is { kind: "tool"; name?: unknown; args?: unknown } {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === "tool" &&
-    typeof (value as { name?: unknown }).name === "string"
+    typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "tool"
   );
 }
 
-function isPing(value: unknown): boolean {
+function isPing(value: unknown): value is PingMessage {
   return (
     typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "ping"
   );
 }
 
+/** Handlers promise `Record<string, unknown>`; the wire promises nothing. */
+function toArgs(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
 async function dispatch(message: ToolMessage): Promise<ToolResponse> {
-  const args = message.args ?? {};
+  const args = toArgs(message.args);
   switch (message.name) {
     case "browser.snapshot":
       return ok(takeSnapshot());
@@ -64,12 +80,17 @@ if (window.__aiAssistantContentReady !== true) {
       sendResponse(ok({ ready: true }));
       return true;
     }
-    if (!isToolMessage(message)) {
+    if (!isToolKind(message)) {
+      return false; // not ours (e.g. a kind:"bg" message): let others answer
+    }
+    if (typeof message.name !== "string") {
+      sendResponse(fail("tool adı eksik ya da metin değil"));
       return false;
     }
 
-    dispatch(message).then(sendResponse, (error: unknown) => {
-      console.warn(LOG, message.name, error);
+    const name = message.name;
+    dispatch({ kind: "tool", name, args: message.args }).then(sendResponse, (error: unknown) => {
+      console.warn(LOG, name, error);
       sendResponse(fail(error instanceof Error ? error.message : String(error)));
     });
     return true; // keep the message channel open for the async reply

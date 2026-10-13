@@ -2,13 +2,21 @@
 
 ## Ölçüm yöntemi
 
-`test/snapshot.probe.js` (production `src/content/{dom,snapshot}.ts` kodunun birebir JS
-aynası) sayfaya konsoldan enjekte edilip `__aiProbe.measure(5)` ile ölçüldü. Her satır
-5 koşunun medyanı. Viewport ~1400×900, laptop CPU, Chromium tabanlı tarayıcı.
+`test/snapshot.probe.js` sayfaya konsoldan enjekte edilip `__aiProbe.measure(5)` ile
+ölçüldü. Her satır 5 koşunun medyanı. Viewport ~1400×900, laptop CPU, Chromium tabanlı
+tarayıcı.
+
+Probe artık **elle tutulan bir kopya değil**, `src/dev/probe.entry.ts`'ten üretiliyor —
+production koduyla asla ayrışamaz:
+
+```
+npx esbuild src/dev/probe.entry.ts --bundle --format=iife --target=chrome110 \
+  --outfile=test/snapshot.probe.js
+```
 
 > Bu ölçümler **snapshot algoritmasını** doğrular. `chrome.*` köprüsü (enjeksiyon yedeği,
-> 8 sn timeout, `brave://` reddi, `browser.navigate`) extension gerçekten yüklenmeden
-> doğrulanamaz — K1 manifest'i push'ladıktan sonra tekrar koşulacak (aşağıda açık iş).
+> 8 sn timeout, `brave://` reddi, `browser.navigate`) extension gerçekten Brave'e
+> yüklenmeden doğrulanamaz (aşağıda açık iş).
 
 ## Sonuçlar
 
@@ -21,8 +29,17 @@ aynası) sayfaya konsoldan enjekte edilip `__aiProbe.measure(5)` ile ölçüldü
 | hepsiburada.com/ara?q=mekanik+klavye | 4.373 | 615 | **150 (tavan)** | 13,0 ms | 39,8 ms | 1372 |
 | httpbin.org/forms/post | 46 | 13 | 13 | 1,2 ms | 9,6 ms | 181 |
 
-**Hedef < 300 ms'in çok altında.** En kötü durum 39,8 ms (hepsiburada, ilk koşu — sonraki
-koşular 13 ms; fark layout cache'inin ısınması). İsimsiz öğe sayısı her sayfada 0.
+**UYARI: yukarıdaki tablo denetim öncesi algoritmaya ait.** Denetimden sonra yalnızca en
+ağır sayfa yeniden ölçüldü:
+
+| Sayfa | Aday | Öğe | Medyan | En kötü |
+|---|---|---|---|---|
+| hepsiburada.com/ara (denetim sonrası) | 615 | 150 (tavan) | **19,4 ms** | **22,6 ms** |
+
+Medyan 13,0 → 19,4 ms arttı (aday başına ek rect ölçüm pass'i + `getComputedStyle`),
+en kötü durum 39,8 → 22,6 ms düştü. Hedef 300 ms'in hâlâ çok altında. Kazanç: arama
+kutusu artık ilk 6 öğede (`[5] textbox "Site içinde ara"`), eskiden listede çok geriydi.
+Diğer dört sayfa yeniden ölçülmedi.
 
 ## Testte bulunup düzeltilenler
 
@@ -42,6 +59,97 @@ koşular 13 ms; fark layout cache'inin ısınması). İsimsiz öğe sayısı her
    → Metin yürüyüşü için ayrı, **geometrik olmayan** `isRendered()` yazıldı
    (`checkVisibility` / display-visibility-opacity). Fixture'da 340 → 749 karakter,
    başlıklar geri geldi. Yan fayda: metin başına ata yürüyüşü yapılmadığı için hızlı.
+
+## Denetim turu — 5 paralel incelemeci
+
+Kod 5 ayrı incelemeciye dağıtıldı (her birine ayrı dosya sahipliği, "düzeltmeden önce
+hatayı kanıtla" kuralıyla). Çıkan **gerçek** hatalar, ciddiyet sırasıyla:
+
+**Güvenlik**
+- `read {ref}` bir `type="password"` alanına çağrıldığında parolayı **düz metin
+  döndürüyordu** (`{"text":"hunter2"}`). `snapshot` aynı değeri `"••••"` maskeliyordu,
+  yani `read` maskelemenin etrafından dolaşan bir yoldu. Artık değer taşıyan korumalı
+  kontroller maskeleniyor; "Şifre hatalı" gibi sayfa metni maskelenmiyor.
+- `isProtectedField` yalnızca `type=password` + `autocomplete` bakıyordu; `name="cvv"`
+  ve `name="cardNumber"` alanlarına yazma geçiyordu. Artık name/id/placeholder/
+  data-testid/erişilebilir ad, TR+EN desen listesine karşı kontrol ediliyor.
+- `javascript:` / `data:` engeli **kazara** çalışıyordu (şema kontrolüyle değil, port
+  parse hatasıyla) ve sızdırıyordu: `javascript:/**/alert(1)`, `mailto:` geçiyordu.
+  Artık açık `http`/`https` allow-list'i var, `localhost:3000` çalışmaya devam ediyor.
+
+**Çalışmayan özellikler**
+- **Enjeksiyon yedeği hiç çalışmıyordu.** CRXJS content script'i bir *loader*; gövdesi
+  `await import(...)` başlatıp senkron dönüyor, `onMessage.addListener` ise dinamik
+  import edilen modülde. `executeScript` loader bitince resolve olduğu için ikinci
+  `sendMessage` de "receiving end does not exist" alıyordu. Artık enjeksiyondan sonra
+  content script'e ping atılıyor (50 ms aralık, 3 sn üst sınır).
+- **Uzun sayfada ekrandaki hiçbir öğe snapshot'a girmiyordu.** `MAX_CANDIDATES` kesmesi
+  DOM sırasındaydı; 1500 adaylı bir katalogda kullanıcı aşağı kaydırmışsa 150 ref'in
+  hepsi tepedeki ekran dışı bağlantılar oluyordu. Artık önce tüm rect'ler ölçülüp bütçe
+  viewport'a en yakın düğümlere harcanıyor (ölçüm: 0/100 → 100/100).
+- **`read {ref}`, nav/aside/footer içindeki öğeler için boş string dönüyordu** —
+  `closest()` tüm dokümanda eşleştiği için. Artık eleme sadece kökün içindeki chrome'a.
+- **`navigate` eski sayfanın url/title'ını dönüyordu.** Chrome yeni yanıt gelene kadar
+  eski dokümanı `complete` tutuyor; dinleyici `tabs.update`'ten sonra bağlandığı için
+  yavaş başlayan navigasyonlarda poller eski "complete"i görüp anında başarı dönüyordu.
+- **`scroll` iç kaydırma konteynerlerini hiç kaydırmıyordu** — body kaydırılamaz olan
+  sayfalarda `ok:true` + `scroll_y:0` dönüp LLM'i sonsuz döngüye sokuyordu.
+- **`highlight` kutusu yanlış yere çiziliyordu** (`scroll-behavior: smooth` sayfalarda
+  289 px sapma ölçüldü) ve sayfa kaydırılınca yerinde donuyordu. Artık `requestAnimationFrame`
+  ile öğeyi takip ediyor.
+
+**Sessiz yalanlar (`ok:true` dönüp hiçbir şey yapmayanlar)**
+- HTML5 doğrulaması submit'i engellerken `submitted:true` deniyordu (form dinleyicisi
+  0 kez çalışıyordu). Artık ilk geçersiz alan isimlendirilip dürüst `fail` dönüyor.
+- `form="baska-id"` ile ilişkili alan yanlış forma gidiyordu (`closest` onu bulamaz).
+- `maxlength=5` alana 12 karakter yazılıyordu; `type=number` alana `"abc"` yazılıp alan
+  boş kalıyordu; `disabled`/`aria-disabled` öğeye tıklama ve `checkbox`'a metin yazma
+  başarı sayılıyordu.
+- React/Vue kontrollü `<select>` eski değerine geri dönüyordu (düz `element.value`).
+- `input[type=file]` native setter'ı ve eksik `document.execCommand` **exception
+  fırlatıyordu** — handler'ların asla fırlatmaması sözleşmesinin ihlali.
+
+**Çökme**
+- `label[for="…"]` seçicisinde yalnızca `"` kaçırılıyordu; backslash ile biten bir `id`
+  `takeSnapshot()`'ı baştan sona `SyntaxError` ile düşürüyordu.
+
+**Kozmetik / sağlamlık**
+- Bozuk `{kind:"tool"}` mesajında kanal sessizce kapanıyor, köprü Türkçe olmayan ham
+  hata alıyordu. `chrome.tabs.sendMessage` alıcı yanıt vermezse `undefined` resolve
+  ediyor, `as ToolResponse` cast'i bunu gizleyip panele `{ok: undefined}` yolluyordu.
+- `resolveTab` panelin kendi sekmesini döndürebiliyordu (dev tester tabId'siz hiç
+  çalışmıyordu). Webstore kontrolü substring'di, `?q=chrome.google.com/webstore` haksız
+  yere bloke oluyordu. `navigate` bütçesi 16 sn idi, sözleşme 15 sn.
+- `position:fixed` mega-menüler haksız yere gizli sayılıyordu; kapalı off-canvas drawer
+  (yalnızca dikey örtüşmeye bakıldığı için) öncelik kuyruğunu dolduruyordu; etiketsiz
+  `<select>` adı tüm option listesi oluyordu; `input[type=image]` textbox raporlanıyordu.
+- `dropRedundantAncestors` O(aday²) idi: 150 ürünlük ızgarada 134.927 `contains()`
+  çağrısı. Ata yürüyüşüne çevrildi (aynı senaryoda 77 çağrı), eşdeğerliği 300 rastgele
+  DOM'da kanıtlandı.
+
+## Otomatik testler
+
+K2 kodunun artık **191 testi** var (önceden sıfırdı):
+
+```
+npx vitest run --config src/dev/vitest.k2.config.ts
+  src/content/types.test.ts        10
+  src/bridge/executeTool.test.ts   72
+  src/content/snapshot.test.ts     41
+  src/content/actions.test.ts      68
+```
+
+Kök `vitest.config.ts` K1'e ait ve `include` yalnızca `src/panel/**` diyor, bu yüzden
+K2 testleri ayrı config ile koşuyor. **K1'den istek:** `include`'a
+`src/content/**/*.test.ts` ve `src/bridge/**/*.test.ts` eklenirse `npm test` her şeyi
+kapsar.
+
+**Bu testlerin sınırı:** jsdom layout hesaplamaz. `getBoundingClientRect`, `innerText`,
+`scrollIntoView`, `isContentEditable`, `execCommand`, `checkVisibility`, `window.scrollY`
+ve `chrome.*` stub'landı. Dolayısıyla görünürlük **kuralları** gerçek kodla sınanıyor ama
+**geometri** (bbox değerleri, viewport öncelik sıralaması, 1200 aday bütçesi) yalnızca
+stub'ın söylediği kadar doğru; `scroll`'un iç-kaydırıcı dalı jsdom'da hiç çalışmıyor ve
+test edilmedi. Brave'de elle yükleme testinin yerine geçmez.
 
 ## Kabul kriterleri
 
@@ -118,6 +226,22 @@ checkbox `value` alanları (`"true"`/`"false"`) beklendiği gibi.
 - `@types/chrome` devDependency olarak gerekli (TS strict'te `chrome` global'i için).
 - `src/dev/tester.html` production build'de de açılsın istiyorsak vite
   `build.rollupOptions.input`'a eklenmeli. Dev modda gerek yok.
+
+**Hepsi K1'de mevcut çıktı — yalnızca üç küçük istek kaldı:**
+
+1. `vitest.config.ts` → `include`'a `src/content/**/*.test.ts` ve
+   `src/bridge/**/*.test.ts` eklenmesi, böylece `npm test` K2'nin 191 testini de koşar.
+2. `package.json`'a **K2 tarafından bir satır eklendi** (özür, dosya K1'in):
+   `"allowScripts": { "esbuild@0.25.12": true }`. npm 11 postinstall script'lerini
+   varsayılan olarak bloke ediyor; onsuz `npm install` sonrası `vite build` esbuild
+   binary'si olmadan patlıyor. pnpm tarafında eşdeğeri `pnpm-workspace.yaml`'da zaten
+   var. İstenirse geri alınır, ama o zaman npm kullanan herkesin elle onaylaması gerekir.
+3. **`src/panel/App.tsx:316` hata içeriyor** (K1'in dosyası, dokunulmadı): aktif sekme
+   `{active:true, lastFocusedWindow:true}` ile çözülüyor; panel sekme modunda
+   (sidePanel API'si olmayan Brave yedeği) bu sorgu **panelin kendi sekmesini**
+   döndürüyor ve köprüye `tab.id` olarak geçiyor. Köprüdeki aynı hata düzeltildi
+   (kendi eklenti sayfalarımız + `windowType:"normal"` filtresi) ama panel açıkça bir
+   tabId geçtiği için bu düzeltme onu kurtarmıyor.
 
 ## K3'e: `tools/browser.py` için argüman şemaları
 

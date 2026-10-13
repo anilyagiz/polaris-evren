@@ -53,8 +53,20 @@ const MAX_CLIP_DEPTH = 20;
  * `checkVisibility()` does not cover this, and the pattern is common
  * (collapsed menus, off-screen carousels), so without it the LLM gets refs it
  * can never click.
+ *
+ * The walk stops at `position: fixed`, on the element itself or on any ancestor:
+ * a fixed box is laid out against the viewport, so nothing above it clips it.
+ * Without that stop, a fixed mega-menu or modal nested in a short
+ * `overflow:hidden` header was reported hidden while covering half the screen,
+ * and the LLM could not see a single item in it. (A transformed, filtered or
+ * `contain`ed ancestor does become the containing block of a fixed box and can
+ * clip it; we accept that rare stray ref rather than lose every fixed panel.)
  */
-function isClippedAway(element: Element, rect: DOMRect): boolean {
+function isClippedAway(element: Element, rect: DOMRect, position: string): boolean {
+  if (position === "fixed") {
+    return false;
+  }
+
   let parent = element.parentElement;
   let depth = 0;
 
@@ -75,6 +87,9 @@ function isClippedAway(element: Element, rect: DOMRect): boolean {
         return true;
       }
     }
+    if (style.position === "fixed") {
+      return false;
+    }
     parent = parent.parentElement;
     depth += 1;
   }
@@ -82,8 +97,7 @@ function isClippedAway(element: Element, rect: DOMRect): boolean {
 }
 
 /** The classic `.sr-only` / `.visually-hidden` recipes. */
-function isScreenReaderOnly(element: Element): boolean {
-  const style = window.getComputedStyle(element);
+function isScreenReaderOnly(style: CSSStyleDeclaration): boolean {
   if (style.clipPath === "inset(50%)") {
     return true;
   }
@@ -96,16 +110,22 @@ function isScreenReaderOnly(element: Element): boolean {
  * marked aria-hidden, is not clipped away by an ancestor and is not a
  * screen-reader-only shim. Uses `checkVisibility()` when available
  * (Chromium 105+) because it also covers `content-visibility`.
+ *
+ * `knownRect` lets a caller that has already measured the element skip a second
+ * layout read, and keeps the visibility verdict and the reported bbox in sync.
  */
-export function isVisible(element: Element): boolean {
-  const rect = element.getBoundingClientRect();
+export function isVisible(element: Element, knownRect?: DOMRect): boolean {
+  const rect = knownRect ?? element.getBoundingClientRect();
   if (rect.width < MIN_INTERACTIVE_SIZE || rect.height < MIN_INTERACTIVE_SIZE) {
     return false;
   }
   if (element.closest("[aria-hidden='true']") !== null) {
     return false;
   }
-  if (isClippedAway(element, rect) || isScreenReaderOnly(element)) {
+
+  // One computed style for all three checks below.
+  const style = window.getComputedStyle(element);
+  if (isScreenReaderOnly(style) || isClippedAway(element, rect, style.position)) {
     return false;
   }
 
@@ -122,7 +142,6 @@ export function isVisible(element: Element): boolean {
     });
   }
 
-  const style = window.getComputedStyle(element);
   return (
     style.display !== "none" &&
     style.visibility !== "hidden" &&
@@ -182,7 +201,9 @@ function textFromAssociatedLabel(element: Element): string {
   }
   const id = element.getAttribute("id");
   if (id !== null && id !== "") {
-    const escaped = id.replace(/"/g, '\\"');
+    // A lone backslash would escape the closing quote and throw a SyntaxError
+    // out of the whole snapshot, so escape it together with the quote.
+    const escaped = id.replace(/["\\]/g, "\\$&");
     const label = document.querySelector<HTMLLabelElement>(`label[for="${escaped}"]`);
     if (label !== null) {
       return label.innerText;
@@ -195,17 +216,24 @@ function textFromAssociatedLabel(element: Element): string {
  * Accessible name, in the order required by the spec:
  * aria-label → aria-labelledby → <label> → placeholder → innerText → title →
  * alt → value.
+ *
+ * A `<select>` is the one element that is never named by its own content: its
+ * `innerText` is the whole option list ("Marka seçin Logitech Razer Keychron…")
+ * and its `value` the raw slug of the selected option ("ist"). Neither is a
+ * label, and the selected option is already reported as the element's value, so
+ * both candidates are skipped for selects.
  */
 export function accessibleName(element: HTMLElement, maxLength: number): string {
+  const namedByContent = !(element instanceof HTMLSelectElement);
   const candidates: string[] = [
     element.getAttribute("aria-label") ?? "",
     textFromLabelledBy(element),
     textFromAssociatedLabel(element),
     element.getAttribute("placeholder") ?? "",
-    element.innerText ?? "",
+    namedByContent ? element.innerText ?? "" : "",
     element.getAttribute("title") ?? "",
     element.getAttribute("alt") ?? "",
-    (element as HTMLInputElement).value ?? "",
+    namedByContent ? (element as HTMLInputElement).value ?? "" : "",
   ];
 
   for (const candidate of candidates) {
@@ -240,7 +268,9 @@ export function roleOf(element: HTMLElement): string {
       const type = (element as HTMLInputElement).type.toLowerCase();
       if (type === "checkbox") return "checkbox";
       if (type === "radio") return "radio";
-      if (type === "submit" || type === "button" || type === "reset") return "button";
+      // `type=image` is a submit button with a picture on it, not a text field.
+      if (type === "submit" || type === "button" || type === "reset" || type === "image")
+        return "button";
       if (type === "range") return "slider";
       if (type === "file") return "button";
       return "textbox";
@@ -266,6 +296,11 @@ export function mainContentRoot(): HTMLElement {
 /**
  * Visible text of `root`, skipping chrome (nav/footer/aside/script/style) and
  * hidden subtrees, with paragraph breaks preserved.
+ *
+ * "Chrome" is only skipped when it sits *inside* `root`. An excluded ancestor
+ * above `root` must not silence it: `browser.read(ref)` on a sidebar card, a
+ * nav link or a footer phone number asks for exactly that text, and matching
+ * `closest()` against the whole document returned "" for every one of them.
  */
 export function extractVisibleText(root: HTMLElement, maxLength: number): string {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -281,7 +316,11 @@ export function extractVisibleText(root: HTMLElement, maxLength: number): string
       continue;
     }
     const parent = node.parentElement;
-    if (parent === null || parent.closest(TEXT_EXCLUDED_SELECTOR) !== null) {
+    if (parent === null) {
+      continue;
+    }
+    const excluded = parent.closest(TEXT_EXCLUDED_SELECTOR);
+    if (excluded !== null && excluded !== root && root.contains(excluded)) {
       continue;
     }
 
