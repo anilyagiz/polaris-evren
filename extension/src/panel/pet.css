@@ -1,0 +1,263 @@
+.polaris-pet-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--star, #b8862c);
+  cursor: pointer;
+  outline-offset: 3px;
+  border-radius: 22px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.polaris-pet-button svg {
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+.polaris-pet-button:focus-visible {
+  outline: 2px solid var(--focus, #c99335);
+}
+.pet-character {
+  transform-origin: 100px 145px;
+  animation: polaris-breathe 3.6s ease-in-out infinite;
+}
+.pet-star-head {
+  transform-origin: 100px 90px;
+  transition: transform 0.25s ease;
+}
+.pet-pupils {
+  transform: translate(var(--pet-look-x, 0), var(--pet-look-y, 0));
+  transition: transform 0.12s ease;
+}
+.pet-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: polaris-blink 5.5s ease-in-out infinite;
+}
+.pet-right-arm {
+  transform-origin: 139px 84px;
+  transition: transform 0.3s ease;
+}
+.pet-stardust {
+  animation: polaris-twinkle 3s ease-in-out infinite;
+}
+.pet-brows {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.pet-greeting .pet-star-head {
+  transform: rotate(var(--pet-tilt, 0deg)) translateY(-2px);
+}
+.pet-greeting .pet-right-arm {
+  animation: polaris-wave 0.65s ease-in-out infinite;
+}
+.pet-greeting .pet-brows,
+.pet-listening .pet-brows,
+.pet-waiting .pet-brows {
+  opacity: 1;
+}
+.pet-greeting .pet-character {
+  animation: polaris-happy 1.2s ease-in-out infinite;
+}
+.pet-working .pet-character {
+  animation: polaris-breathe 2.6s ease-in-out infinite;
+}
+.pet-working .pet-code-line {
+  animation: polaris-code 1.4s steps(2, end) infinite;
+}
+.pet-working .line-two {
+  animation-delay: 0.45s;
+}
+.pet-typing-hand {
+  animation: polaris-type 0.28s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.pet-typing-hand.hand-right {
+  animation-delay: 0.14s;
+}
+.pet-greeting .hand-right {
+  opacity: 0;
+}
+.pet-listening .pet-soundwaves {
+  animation: polaris-twinkle 1s ease-in-out infinite;
+}
+.pet-speaking .pet-mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: polaris-talk 0.35s ease-in-out infinite;
+}
+.pet-celebrate .pet-stardust {
+  transform-origin: 100px 90px;
+  animation: polaris-celebrate 0.8s ease-out 2;
+}
+.pet-greeting-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 94%;
+  transform: translate(-50%, 5px);
+  background: var(--surface, #fffdf8);
+  color: var(--ink, #0b1020);
+  border: 1px solid var(--line, #e3ddcf);
+  box-shadow: var(--shadow-sm);
+  padding: 5px 9px;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+  pointer-events: none;
+  z-index: 3;
+}
+.pet-greeting .pet-greeting-bubble {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.pet-compact .pet-greeting-bubble {
+  left: 0;
+  bottom: auto;
+  top: 100%;
+  transform: translate(0, 0);
+}
+.pet-compact.pet-greeting .pet-greeting-bubble {
+  transform: translate(0, 3px);
+}
+.welcome .pet-welcome {
+  display: flex;
+  justify-content: center;
+  margin: -5px 0 2px;
+}
+.pet-dock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  margin: -5px 0 3px;
+  min-width: 0;
+}
+.pet-dock-copy {
+  min-width: 0;
+}
+.pet-dock-copy strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.pet-dock-copy p {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+.pet-header {
+  display: flex;
+  align-items: center;
+  margin: -7px -3px -7px -6px;
+}
+@keyframes polaris-breathe {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(1deg);
+  }
+}
+@keyframes polaris-blink {
+  0%,
+  42%,
+  46%,
+  100% {
+    transform: scaleY(1);
+  }
+  44% {
+    transform: scaleY(0.07);
+  }
+}
+@keyframes polaris-wave {
+  0%,
+  100% {
+    transform: rotate(-100deg);
+  }
+  50% {
+    transform: rotate(-125deg);
+  }
+}
+@keyframes polaris-happy {
+  0%,
+  100% {
+    transform: translateY(-1px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(2deg);
+  }
+}
+@keyframes polaris-twinkle {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes polaris-code {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes polaris-type {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+@keyframes polaris-talk {
+  0%,
+  100% {
+    transform: scaleY(0.6);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes polaris-celebrate {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .polaris-pet-button * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .pet-greeting .pet-right-arm {
+    transform: rotate(-110deg);
+  }
+  .pet-greeting .pet-greeting-bubble {
+    opacity: 1;
+  }
+}

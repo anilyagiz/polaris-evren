@@ -11,6 +11,11 @@ export default defineConfig({
   plugins: [react(), crx({ manifest })],
   server: { fs: { allow: [repoRoot] } },
   build: {
-    rollupOptions: { input: { permission: "src/panel/permission.html" } },
+    rollupOptions: {
+      input: {
+        permission: "src/panel/permission.html",
+        pet: "src/panel/pet-preview.html",
+      },
+    },
   },
 });

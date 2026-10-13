@@ -27,6 +27,7 @@ import {
 import { friendlyError, type FriendlyError } from "./errors";
 import { checkHealth, discoverBackend, type HealthState } from "./health";
 import { prettyModel } from "./llm";
+import { PolarisPet, type PetMood } from "./PolarisPet";
 import {
   normalizeBackend,
   requestId,
@@ -487,6 +488,8 @@ export default function App({
   const recorderRef = useRef(recorder);
   recorderRef.current = recorder;
   const busy = activeId !== null || recorder.state !== "idle";
+  const petMood: PetMood = recorder.state === "recording" ? "listening"
+    : pending ? "waiting" : speaker.playing ? "speaking" : busy ? "working" : "idle";
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const cancel = () => {
@@ -569,6 +572,7 @@ export default function App({
     };
   }, []);
   useEffect(() => {
+    if (requests.length === 0) return;
     const node = scrollEnd.current;
     if (!node) return;
     const list = node.parentElement;
@@ -619,8 +623,8 @@ export default function App({
     <main className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">
-            <PolarisMark size={20} />
+          <span className="pet-header">
+            <PolarisPet size={52} mood={petMood} compact />
           </span>
           <div>
             <h1>Polaris</h1>
@@ -695,9 +699,8 @@ export default function App({
           />
         {requests.length === 0 && (
           <div className="welcome">
-            <div className="welcome-symbol" aria-hidden="true">
-              <span className="halo" />
-              <PolarisMark size={30} />
+            <div className="pet-welcome">
+              <PolarisPet size={142} mood={petMood} />
             </div>
             <p className="eyebrow">Yolunu bulan asistan</p>
             <h2>Ne yapmak istersin?</h2>
@@ -796,6 +799,29 @@ export default function App({
         <div ref={scrollEnd} />
       </section>
       <footer className="composer-area">
+        {requests.length > 0 && (
+          <div className="pet-dock">
+            <PolarisPet size={88} mood={petMood} />
+            <div className="pet-dock-copy">
+              <strong>
+                {
+                  {
+                    idle: "Bir sonraki maceraya hazırım",
+                    working: "Bir saniye, üzerinde çalışıyorum…",
+                    listening: "Kulaklarım sende",
+                    speaking: "Anlatıyorum…",
+                    waiting: "Son söz sende",
+                  }[petMood]
+                }
+              </strong>
+              <p>
+                {petMood === "working"
+                  ? "Polaris laptopunun başında."
+                  : "Üzerine gel, seninle selamlaşsın."}
+              </p>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>

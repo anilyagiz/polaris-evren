@@ -30,3 +30,15 @@ npx tsc --noEmit
 npx vitest run
 npx vite build
 ```
+# Etkileşimli Polaris peti
+
+Güncel main arayüzüne eklenen `PolarisPet.tsx` yerel SVG karakteridir. Mouse üzerine
+gelince el sallar, gözleri pointer'ı takip eder; tıklanınca kısa bir selam ve yıldız
+animasyonu gösterir. Klavye odağı ve Enter/Space ile de selamlaşılabilir.
+
+Panelin gerçek durumuna göre dinlenme, laptopla çalışma, mikrofon dinleme, konuşma
+ve onay bekleme pozları kullanılır. Pet etkileşimleri araç çağrısı veya ağ isteği
+başlatmaz. Hareket azaltma tercihi açık olduğunda animasyonlar kapatılır.
+
+Derlenen `src/panel/pet-preview.html` sayfası beş durumu bağımsız denemeye yarar.
+`npm run preview` ile servis edildiğinde `/src/panel/pet-preview.html` yolundan açılır.
