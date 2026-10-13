@@ -4,6 +4,34 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) esaslıdır; sü
 [Semantik Sürümleme](https://semver.org/lang/tr/) izler. Sürüm numarası
 `extension/manifest.json` ve `backend/config.py` (`APP_VERSION`) ile aynıdır.
 
+## [0.2.0] — 2026-10-13
+
+### Kurulum
+- **Kurulum sihirbazı `PolarisSetup-0.2.0.exe`:** İleri → Kur → Bitir. Yönetici izni ve
+  önceden kurulu Python gerekmez (Python'u kendisi indirir). Konsol penceresi açılmaz,
+  Türkçe ilerleme adımları gösterir. Masaüstü ve Başlat menüsü kısayolu, "Onar",
+  "Brave rehberi", Program Ekle/Kaldır girdisi. Brave yoksa kurmayı önerir.
+  Üstüne kurulunca API anahtarı ve ayarlar korunur.
+
+### Masaüstü
+- **Polaris penceresi:** Brave olmadan sohbet, ses, arama, hatırlatıcı. **Alt+Space** ile
+  aç/kapa; kapatınca tepside çalışmaya devam eder.
+- **Masaüstü maskotu:** ekranın köşesinde şeffaf, sürüklenebilir altın yıldız. Tek tıkla
+  görev balonu (yaz ya da basılı tutup konuş), çift tıkla Polaris penceresi. Polaris
+  çalışırken kuyruklu yıldıza dönüşür, hatırlatmada sallanır.
+
+### Asistan
+- **Sohbet hafızası:** devam soruları anlaşılır ("peki İzmir'in?"); sohbet kapatıp açınca
+  geri gelir; "Yeni sohbet" düğmesi. Kişisel bilgiler ("benim adım…") kalıcı hafızaya
+  alınır; şifre/kart/IBAN/TC kimlik asla kaydedilmez; "bunu unut" ile silinir.
+- **Tarayıcıda görünür el:** altın yıldız imleç hedefe kayar, tıklar, harf harf yazar ve
+  ne yaptığını söyler. Siteleri yeni sekmede kendisi açar (`browser.open`).
+- **İnternetsiz Türkçe ses:** EMA Lightning (34 MB) varsayılan TTS; 4,6 sn konuşma ~0,9 sn'de
+  üretilir. Olmazsa edge-tts'e geçer.
+- **Varsayılan model Gemma 4 31B** (EVREN), düşünme modu kapalı. Uzun görevler için
+  süre sınırı 15 dk, araç çağrısı sınırı 40.
+- Arkadaşımızın maskotu (PolarisPet) panelde de: başlıkta, karşılamada ve çalışırken.
+
 ## [0.1.1] — 2026-10-13
 
 ### Eklendi

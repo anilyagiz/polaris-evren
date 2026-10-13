@@ -25,7 +25,7 @@ DEFAULT_DB_PATH = DATA_DIR / "assistant.db"
 PROMPTS_DIR = BACKEND_DIR / "prompts"
 
 #: Product version reported by /health and the startup banner.
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 
 load_dotenv(BACKEND_DIR / ".env")
 

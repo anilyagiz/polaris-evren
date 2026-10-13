@@ -73,8 +73,10 @@ function Invoke-Native([string]$exe, [string[]]$argv, [int]$Retries = 1, [string
     if ($code -eq 0) { return }
     $text = ($script:lastOut -join "`n")
     $isNet = $text -match $NetPattern
-    if ($attempt -lt $Retries -and $isNet) {   # yalnızca ağ hatalarında tekrar dene
-      $wait = 5 * $attempt
+    # Antivirüs (Windows Defender) yeni açılan paket dosyalarını tararken kilitleyebilir.
+    $isLock = $text -match '(?i)os error (32|5)\b|being used by another process|Access is denied|başka bir işlem tarafından kullanıl|Erişim engellendi'
+    if ($attempt -lt $Retries -and ($isNet -or $isLock)) {   # ağ ve dosya kilidi hatalarında tekrar dene
+      $wait = if ($isLock) { 10 * $attempt } else { 5 * $attempt }
       Log "  [!] Başarısız (kod $code). $wait sn sonra tekrar deneniyor ($($attempt + 1)/$Retries)..."
       Start-Sleep -Seconds $wait
       continue
@@ -207,7 +209,7 @@ try {
   $req = @("-r", (Join-Path $Root "backend\requirements.txt"))
   $trayReq = Join-Path $Root "backend\requirements-tray.txt"
   if (Test-Path $trayReq) { $req += @("-r", $trayReq) }
-  Invoke-Native $uv (@("pip", "install", "--python", $VenvPy) + $req) -Retries 3 -Tag "deps"
+  Invoke-Native $uv (@("pip", "install", "--python", $VenvPy) + $req) -Retries 5 -Tag "deps"
   Invoke-Native $VenvPy @("-c", "import fastapi, uvicorn, openai, faster_whisper, pystray; print('import OK')") -Tag "deps"
   Ok "paketler kuruldu"
 

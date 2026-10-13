@@ -149,7 +149,7 @@ def test_health_fields(app_module):
     data = _client(app_module).get("/health").json()
     for key in ("ok", "llm_model", "cua_enabled", "llm_configured"):
         assert key in data
-    assert data["version"] == "0.1.1"
+    assert data["version"] == "0.2.0"
     assert isinstance(data["brave_configured"], bool)
     assert isinstance(data["stt_ready"], bool) and isinstance(data["tts_available"], bool)
 
