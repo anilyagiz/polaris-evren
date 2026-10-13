@@ -12,3 +12,10 @@ dist/
 
 # local duplicate copy
 assistant/
+.env.*
+!.env.example
+*.pyc
+*.db
+*.db-*
+test-results/
+playwright-report/
