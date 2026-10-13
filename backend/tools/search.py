@@ -1,0 +1,102 @@
+"""web.search tool backed by the Brave Search API."""
+from __future__ import annotations
+
+import html
+import logging
+import os
+import re
+
+import httpx
+
+from backend.tools.registry import Tool, ToolContext, register
+
+logger = logging.getLogger(__name__)
+
+BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
+DEFAULT_COUNT = 5
+MAX_COUNT = 20  # Brave API limit
+_TAG = re.compile(r"<[^>]+>")
+_WHITESPACE = re.compile(r"\s+")
+
+
+def strip_html(text: str) -> str:
+    return _WHITESPACE.sub(" ", html.unescape(_TAG.sub("", text or ""))).strip()
+
+
+async def web_search(query: str, count: int = DEFAULT_COUNT) -> dict:
+    api_key = os.getenv("BRAVE_API_KEY", "").strip()
+    if not api_key:
+        return {"ok": False, "error": "Web araması yapılandırılmamış: BRAVE_API_KEY eksik."}
+
+    headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
+    params = {"q": query, "count": count}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(BRAVE_URL, headers=headers, params=params)
+    except httpx.TimeoutException:
+        logger.warning("Brave search timed out for %r", query)
+        return {"ok": False, "error": "Arama zaman aşımına uğradı, lütfen tekrar deneyin."}
+    except httpx.HTTPError as exc:
+        logger.warning("Brave search network error: %s", exc)
+        return {"ok": False, "error": "Arama servisine ulaşılamadı. İnternet bağlantısını kontrol edin."}
+
+    if response.status_code == 429:
+        return {"ok": False, "error": "Arama limiti aşıldı, biraz sonra tekrar deneyin."}
+    # Brave reports a bad key as 422 SUBSCRIPTION_TOKEN_INVALID rather than 401.
+    if response.status_code in (401, 403) or "SUBSCRIPTION_TOKEN_INVALID" in response.text:
+        return {"ok": False, "error": "Brave API anahtarı geçersiz ya da yetkisiz."}
+    if response.status_code >= 400:
+        logger.warning("Brave search HTTP %s: %s", response.status_code, response.text[:300])
+        return {"ok": False, "error": f"Arama servisi hata döndürdü (HTTP {response.status_code})."}
+
+    try:
+        items = response.json().get("web", {}).get("results", [])
+    except ValueError:
+        return {"ok": False, "error": "Arama servisinden geçersiz yanıt alındı."}
+
+    results = [
+        {
+            "title": strip_html(item.get("title", "")),
+            "url": item.get("url", ""),
+            "snippet": strip_html(item.get("description", "")),
+        }
+        for item in items[:count]
+        if item.get("url")
+    ]
+    return {"results": results}
+
+
+async def _handle_search(args: dict, ctx: ToolContext) -> dict:
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return {"ok": False, "error": "Arama sorgusu boş olamaz."}
+    try:
+        count = int(args.get("count") or DEFAULT_COUNT)
+    except (TypeError, ValueError):
+        count = DEFAULT_COUNT
+    return await web_search(query, max(1, min(count, MAX_COUNT)))
+
+
+register(
+    Tool(
+        name="web.search",
+        description="Brave Search ile internette arama yapar; her sonuç için başlık, URL ve kısa özet döndürür. "
+        "Güncel bilgi, ürün karşılaştırma ve kaynak gereken sorular için kullan.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Arama sorgusu."},
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_COUNT,
+                    "default": DEFAULT_COUNT,
+                    "description": "Döndürülecek sonuç sayısı (varsayılan 5).",
+                },
+            },
+            "required": ["query"],
+        },
+        risk="safe",
+        handler=_handle_search,
+    )
+)
