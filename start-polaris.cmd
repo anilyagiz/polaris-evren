@@ -28,22 +28,17 @@ echo [1/4] Python ortami hazir (.venv)
 rem ---------- 2) backend\.env ----------
 if exist "backend\.env" goto :env_ok
 copy /y "backend\.env.example" "backend\.env" >nul
-echo.
-echo  *** backend\.env olusturuldu ***
-echo  Simdi Not Defteri acilacak. Lutfen:
-echo    - DEEPSEEK_API_KEY= satirina LLM anahtarinizi yazin (zorunlu)
-echo    - BRAVE_API_KEY= satirina Brave Search anahtarinizi yazin (web aramasi icin)
-echo    - Dosyayi KAYDEDIN ve Not Defteri'ni KAPATIN; kurulum otomatik devam eder.
-echo.
-start "" /wait notepad "backend\.env"
+echo [2/4] backend\.env olusturuldu. API anahtarini panelden gireceksin:
+echo        Polaris paneli -^> Ayarlar -^> Yapay zeka -^> anahtari yapistir -^> Kaydet
+goto :env_done
 :env_ok
 findstr /r /c:"^DEEPSEEK_API_KEY=buraya" /c:"^DEEPSEEK_API_KEY= *$" "backend\.env" >nul 2>&1
 if errorlevel 1 (
   echo [2/4] backend\.env hazir
 ) else (
-  echo [2/4] [UYARI] backend\.env icinde DEEPSEEK_API_KEY bos. LLM cevap veremez.
-  echo        Duzenlemek icin: notepad backend\.env  ^(sonra backend penceresini yeniden baslatin^)
+  echo [2/4] API anahtari henuz girilmedi: panel -^> Ayarlar -^> Yapay zeka
 )
+:env_done
 
 rem ---------- 3) Extension ----------
 set "DIST="
@@ -68,13 +63,19 @@ if not defined PORT (
 )
 if not defined PORT set "PORT=8765"
 
-rem cikis: 0 = port bos, 2 = Polaris zaten calisiyor, 1 = baska bir program kullaniyor
-%PSX% -Command "$c = Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $c) { exit 0 }; try { $r = Invoke-RestMethod -TimeoutSec 3 -Uri 'http://127.0.0.1:%PORT%/health'; if ($r.ok) { exit 2 } } catch {}; $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; Write-Host ('       PID ' + $c.OwningProcess + ' (' + $p.ProcessName + ')'); exit 1"
-if errorlevel 2 (
-  echo [4/4] Polaris backend zaten calisiyor: http://127.0.0.1:%PORT%
+rem Port secimi: istenen port doluysa yedek portlardan bos olani al (panel kendisi bulur).
+set "PSTATE="
+set "WANTED=%PORT%"
+for /f "tokens=1,2" %%a in ('%PSX% -File "%ROOT%scripts\pick-port.ps1" -Port %PORT%') do (
+  set "PSTATE=%%a"
+  set "PORT=%%b"
+)
+if "%PSTATE%"=="polaris" (
+  echo [4/4] Polaris zaten calisiyor: http://127.0.0.1:%PORT%
   goto :backend_ready
 )
-if errorlevel 1 goto :port_busy
+if not "%PSTATE%"=="free" goto :port_busy
+if not "%PORT%"=="%WANTED%" echo        Port %WANTED% dolu; Polaris %PORT% portunda calisacak ^(panel otomatik bulur^).
 
 rem Tercih: sistem tepsisi uygulamasi (backend'i gizli baslatir). "start-polaris.cmd --console" ile konsol penceresi.
 set "MODE=console"
@@ -127,7 +128,7 @@ echo   3) "Paketlenmemis uzantiyi yukle" -^> su klasoru secin (panoya kopyalandi
 echo        %DIST%
 echo   4) Polaris simgesine tiklayin; yan panel acilir
 echo   5) Ilk bas-konus'ta mikrofon iznini verin
-echo   6) Panel Ayarlar -^> Backend adresi: http://localhost:%PORT%
+echo   6) Panel -^> Ayarlar -^> Yapay zeka: API anahtarini yapistir -^> Kaydet
 echo  =================================================
 echo   Uzanti zaten yukluyse brave://extensions'ta "yenile" yeterli.
 if "%MODE%"=="tray" (
