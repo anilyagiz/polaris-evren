@@ -229,6 +229,11 @@ from . import settings_desktop  # noqa: E402
 settings_desktop.on_enabled = ensure_shots_router
 app.include_router(settings_desktop.router)
 
+# "Masaüstü maskotu" switch (shared file with the tray app).
+from . import settings_mascot  # noqa: E402
+
+app.include_router(settings_mascot.router)
+
 # Polaris desktop window (tray/pywebview) loads the built panel same-origin at /app/.
 from .desktop_app import register as register_desktop_app  # noqa: E402
 

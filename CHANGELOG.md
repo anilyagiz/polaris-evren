@@ -4,6 +4,18 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) esaslıdır; sü
 [Semantik Sürümleme](https://semver.org/lang/tr/) izler. Sürüm numarası
 `extension/manifest.json` ve `backend/config.py` (`APP_VERSION`) ile aynıdır.
 
+## [0.2.2] — 2026-10-14
+
+### Eklendi
+- **Ayarlar → Masaüstü maskotu:** maskotu panelden açıp kapatma anahtarı (birkaç saniye içinde uygulanır).
+
+### Düzeltildi
+- Maskot balonundaki bağlantı artık **"Şimdilik gizle"**: yalnızca bu oturum için gizler,
+  Polaris yeniden açılınca maskot geri gelir. Önceden yanlışlıkla tıklanınca kalıcı kapanıyordu.
+- Tepsi menüsündeki "Maskotu göster/gizle" gizlenmiş maskotu her zaman geri getirir.
+- Maskot birkaç saniyede bir kendini en üste alır; tam ekran uygulamalar ve pencere
+  değişimlerinden sonra arkada kalmaz.
+
 ## [0.2.1] — 2026-10-13
 
 ### Eklendi

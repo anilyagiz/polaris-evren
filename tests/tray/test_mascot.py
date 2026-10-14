@@ -180,7 +180,8 @@ def test_js_api_expand_open_main_and_hide(setup):
 
     api.hide_mascot()
     assert window.calls[-1] == ("hide",)
-    assert setup.store.enabled is False and setup.changed == [1]
+    # "Şimdilik gizle" is session-only: the persisted switch stays on.
+    assert setup.store.enabled is True
 
 
 def test_toggle_persists_and_module_helpers(tmp_path):
@@ -230,3 +231,37 @@ def test_set_hit_regions_without_gui_is_harmless(setup):
     api = setup.window.kwargs["js_api"]
     assert api.set_hit_regions([{"kind": "circle", "x": 1, "y": 1, "w": 2, "h": 2}]) is False
     assert setup.mascot._hit_regions[0]["kind"] == "circle"
+
+
+def test_session_hide_then_tray_toggle_brings_it_back(setup):
+    mascot, window = setup.mascot, setup.window
+    mascot.set_backend("http://127.0.0.1:8765")
+    mascot.mark_started()
+    window.kwargs["js_api"].hide_mascot()          # "Şimdilik gizle"
+    assert mascot.visible is False and setup.store.enabled is True
+    assert mascot.toggle() is True                  # tray "Maskotu göster/gizle"
+    assert window.calls[-1][0] in ("show", "resize") and mascot.visible is True
+    assert setup.store.enabled is True
+
+
+def test_panel_switch_is_applied_by_sync(setup):
+    mascot, window = setup.mascot, setup.window
+    mascot.set_backend("http://127.0.0.1:8765")
+    mascot.mark_started()
+    mascot.sync_from_settings()                      # first call only records the state
+    setup.store.set_enabled(False)                   # what PUT /settings/mascot writes
+    mascot.sync_from_settings()
+    assert window.calls[-1] == ("hide",) and mascot.visible is False
+    setup.store.set_enabled(True)
+    mascot.sync_from_settings()
+    assert mascot.visible is True
+
+
+def test_sync_does_not_undo_session_hide(setup):
+    mascot = setup.mascot
+    mascot.set_backend("http://127.0.0.1:8765")
+    mascot.mark_started()
+    mascot.sync_from_settings()
+    setup.window.kwargs["js_api"].hide_mascot()      # "Şimdilik gizle"
+    mascot.sync_from_settings()
+    assert mascot.visible is False

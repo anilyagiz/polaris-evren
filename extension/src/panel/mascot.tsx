@@ -389,7 +389,7 @@ export function Mascot() {
                 Polaris penceresi
               </button>
               <button type="button" onClick={() => hostCall("hide_mascot")}>
-                Maskotu gizle
+                Şimdilik gizle
               </button>
             </div>
           )}

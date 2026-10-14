@@ -42,6 +42,7 @@ import {
 import { prettyModel, type LlmSettings } from "./llm";
 import { LlmSection, useLlmDraft } from "./LlmSettings";
 import { DesktopSection } from "./DesktopSettings";
+import { MascotSetting } from "./MascotSetting";
 
 /** Four-pointed north star used as the brand mark. */
 export function PolarisMark({ size = 20 }: { size?: number }) {
@@ -345,6 +346,7 @@ export function SettingsModal({
       >
         <LlmSection llm={llm} focusKey={focusKey} />
         <DesktopSection backend={current.backend} />
+        <MascotSetting backend={current.backend} />
         <label className="setting-row">
           <span>
             <strong>Sesli yanıt</strong>

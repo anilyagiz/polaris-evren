@@ -361,6 +361,11 @@ class TrayApp:
                     last = status
             except Exception:
                 log.exception("durum güncellenemedi")
+            if self.mascot is not None:
+                try:
+                    self.mascot.sync_from_settings()  # panel Ayarlar -> Masaüstü maskotu
+                except Exception:
+                    log.exception("maskot ayarı uygulanamadı")
             self._wake.wait(self.ctrl.poll_interval())
             self._wake.clear()
 

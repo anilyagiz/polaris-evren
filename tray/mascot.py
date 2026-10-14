@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -259,7 +260,9 @@ class MascotApi:
         return self._host.set_expanded(bool(expanded))
 
     def hide_mascot(self) -> bool:
-        self._host.set_enabled(False)
+        # "Şimdilik gizle": session only. The persistent switch is the tray menu,
+        # so an accidental click never makes the mascot disappear for good.
+        self._host.hide()
         return True
 
     def set_hit_regions(self, regions: Any) -> bool:
@@ -368,6 +371,50 @@ class MascotWindow:
             # After show(): a colour key set on a hidden form did not stick (black box).
             self._apply_style()
             self._paint_hit_mask()
+            self._start_topmost_keeper()
+
+    def _start_topmost_keeper(self) -> None:
+        """Re-assert HWND_TOPMOST every few seconds while visible.
+
+        Full-screen apps, Win+D/Alt+Tab juggling and other topmost windows can push
+        the star behind; SetWindowPos with SWP_NOACTIVATE never steals focus.
+        """
+
+        if getattr(self, "_keeper", None) is not None:
+            return
+
+        def loop() -> None:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            while not self.quitting and self.window is not None:
+                time.sleep(3)
+                if not self.visible:
+                    continue
+                try:
+                    hwnd = self._hwnd()
+                    if hwnd:
+                        # HWND_TOPMOST=-1; SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE|SWP_SHOWWINDOW
+                        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10 | 0x40)
+                except Exception:
+                    pass
+
+        self._keeper = threading.Thread(target=loop, name="mascot-topmost", daemon=True)
+        self._keeper.start()
+
+    def _hwnd(self) -> int:
+        cached = getattr(self, "_hwnd_cache", 0)
+        if cached:
+            return cached
+        try:
+            from System import Func, Int64  # type: ignore[import-not-found]
+
+            form = self.window.native
+            value = int(form.Invoke(Func[Int64](lambda: form.Handle.ToInt64())))
+        except Exception:
+            value = 0
+        self._hwnd_cache = value
+        return value
 
     def hide(self) -> None:
         with self._lock:
@@ -382,6 +429,29 @@ class MascotWindow:
 
     def set_enabled(self, enabled: bool) -> None:
         self.settings.set_enabled(enabled)
+        self._last_enabled = bool(enabled)
+        if enabled:
+            self.show()
+        else:
+            self.hide()
+        if self._on_change:
+            try:
+                self._on_change()
+            except Exception:
+                log.exception("maskot değişikliği bildirilemedi")
+
+    def sync_from_settings(self) -> None:
+        """Apply an on/off change written by someone else (the panel's Ayarlar).
+
+        Only reacts to *changes* of the persisted switch, so a session-only
+        "Şimdilik gizle" is not undone by the periodic poll.
+        """
+
+        enabled = self.settings.enabled
+        last = getattr(self, "_last_enabled", None)
+        self._last_enabled = enabled
+        if last is None or enabled == last or not self.started.is_set():
+            return
         if enabled:
             self.show()
         else:
@@ -395,6 +465,10 @@ class MascotWindow:
     def toggle(self) -> bool:
         """Flip "Maskotu göster/gizle"; returns the new state."""
 
+        if self.settings.enabled and not self.visible:
+            # Hidden for this session only ("Şimdilik gizle"): bring it back.
+            self.show()
+            return True
         new = not self.settings.enabled
         self.set_enabled(new)
         return new
@@ -506,7 +580,7 @@ class MascotWindow:
     def _on_closing(self) -> bool:
         if self.quitting:
             return True
-        threading.Thread(target=self.set_enabled, args=(False,), daemon=True).start()
+        threading.Thread(target=self.hide, daemon=True).start()
         return False
 
     def _save_now(self) -> None:
